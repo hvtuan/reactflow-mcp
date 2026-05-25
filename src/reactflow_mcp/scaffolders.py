@@ -149,26 +149,49 @@ def scaffold_custom_node(
             'boxShadow: "0 1px 2px rgba(0,0,0,0.05)" }}>'
         )
 
-    # body fields rendering
+    # body fields rendering — style-aware
     body_field_lines: list[str] = []
+    use_tailwind = style == "tailwind"
     for f in normalized_fields:
         if editable and f["type"] == "string":
-            body_field_lines.append(
-                '      <label className="flex flex-col text-xs">\n'
-                f'        <span className="text-slate-500">{f["name"]}</span>\n'
-                f'        <input className="nodrag mt-1 rounded border border-slate-200 px-2 py-1"\n'
-                f'          value={{data.{f["name"]} ?? ""}}\n'
-                f'          onChange={{(e) => updateNodeData(id, {{ {f["name"]}: e.target.value }})}}\n'
-                "        />\n"
-                "      </label>"
-            )
+            if use_tailwind:
+                body_field_lines.append(
+                    '      <label className="flex flex-col text-xs">\n'
+                    f'        <span className="text-slate-500">{f["name"]}</span>\n'
+                    f'        <input className="nodrag mt-1 rounded border border-slate-200 px-2 py-1"\n'
+                    f'          value={{data.{f["name"]} ?? ""}}\n'
+                    f'          onChange={{(e) => updateNodeData(id, {{ {f["name"]}: e.target.value }})}}\n'
+                    "        />\n"
+                    "      </label>"
+                )
+            else:
+                body_field_lines.append(
+                    '      <label style={{ display: "flex", flexDirection: "column", fontSize: 12 }}>\n'
+                    f'        <span style={{{{ color: "#64748b" }}}}>{f["name"]}</span>\n'
+                    f'        <input className="nodrag" style={{{{ marginTop: 4, borderRadius: 4, border: "1px solid #e2e8f0", padding: "4px 8px" }}}}\n'
+                    f'          value={{data.{f["name"]} ?? ""}}\n'
+                    f'          onChange={{(e) => updateNodeData(id, {{ {f["name"]}: e.target.value }})}}\n'
+                    "        />\n"
+                    "      </label>"
+                )
+        else:
+            if use_tailwind:
+                body_field_lines.append(
+                    f'      <div className="text-xs"><span className="text-slate-500">{f["name"]}:</span> '
+                    f"{{String(data.{f['name']} ?? '')}}</div>"
+                )
+            else:
+                body_field_lines.append(
+                    f'      <div style={{{{ fontSize: 12 }}}}><span style={{{{ color: "#64748b" }}}}>{f["name"]}:</span> '
+                    f"{{String(data.{f['name']} ?? '')}}</div>"
+                )
+    if not body_field_lines:
+        if use_tailwind:
+            body_field_lines.append('      <div className="text-sm font-medium">{`' + component_name + "`}</div>")
         else:
             body_field_lines.append(
-                f'      <div className="text-xs"><span className="text-slate-500">{f["name"]}:</span> '
-                f"{{String(data.{f['name']} ?? '')}}</div>"
+                '      <div style={{ fontSize: 14, fontWeight: 500 }}>{`' + component_name + "`}</div>"
             )
-    if not body_field_lines:
-        body_field_lines.append('      <div className="text-sm font-medium">{`' + component_name + "`}</div>")
 
     use_react_flow_hook = ""
     delete_callback = ""
