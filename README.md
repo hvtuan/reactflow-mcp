@@ -140,13 +140,27 @@ First-time PyPI setup: register the trusted publisher on PyPI (`Publishing → A
 - Workflow: `release.yml`
 - Environment: `pypi`
 
+## Drift detection
+
+`scripts/refresh_data.py` compares the bundled API catalog / Pro examples / Svelte data against `reactflow.dev` and `svelteflow.dev` sitemaps and emits a markdown report. Exits non-zero when drift is detected.
+
+`.github/workflows/refresh-data.yml` runs the script weekly (Monday 06:00 UTC) and opens / refreshes a `data-drift` labelled issue when new upstream symbols appear. Manual trigger via `Actions → Data drift check → Run workflow`.
+
+Run locally:
+
+```bash
+python scripts/refresh_data.py                  # stdout
+python scripts/refresh_data.py --out report.md  # write to file
+```
+
 ## Roadmap
 
 - Tune `search_docs` scoring (currently favors large sections over targeted matches)
+- Expand `api_catalog.py` with the ~40 handler/util types the drift check flagged (OnConnect, NodeMouseHandler, ReactFlowInstance, …)
 - Add `reactflow_scaffold_flow(spec)` — full mini-flow from a higher-level description
 - Add `reactflow_visualize_flow(flow_json)` — render mermaid/ascii preview
 - Cover more Svelte Flow edge cases (per-symbol prop differences, not just naming)
-- Auto-refresh data layer from upstream docs on a cron
+- Publish to MCP marketplaces (Smithery, mcp-registry) once PyPI-released
 
 ## License
 

@@ -1,0 +1,50 @@
+name: Data drift check
+
+on:
+  schedule:
+    - cron: "0 6 * * 1"  # weekly: Monday 06:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  drift:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install package
+        run: pip install -e .
+
+      - name: Run drift check
+        id: drift
+        continue-on-error: true   # script exits non-zero when drift detected
+        run: python scripts/refresh_data.py --out drift-report.md
+
+      - name: Show report
+        if: always()
+        run: cat drift-report.md
+
+      - name: Open issue if drift detected
+        if: steps.drift.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Avoid issue spam: close any prior open issue with the same title first.
+          existing=$(gh issue list --state open --label "data-drift" --json number --jq '.[].number')
+          for n in $existing; do
+            gh issue close "$n" --reason "not planned" -c "Superseded by fresh drift report."
+          done
+
+          gh issue create \
+            --title "Data drift detected ($(date -u +%Y-%m-%d))" \
+            --label "data-drift" \
+            --body-file drift-report.md
