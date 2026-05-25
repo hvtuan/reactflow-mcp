@@ -3,7 +3,7 @@
 MCP server giving LLMs first-class knowledge of **React Flow** (`@xyflow/react` v12) and **Svelte Flow** (`@xyflow/svelte`).
 Closes the gap between training-data drift and the current API: surfaces hooks/components/utils/types, v11→v12 migrations, Pro feature catalog, cross-framework symbol mapping, code generators, and a flow JSON linter.
 
-> Status: **v0.3.0** — 8 tools + 1 resource · stdio + HTTP (streamable) transports · MIT licensed · containerized.
+> Status: **v0.5.0** — 14 tools + 4 prompts + 1 resource + 19 OSS recipes covering React Flow Pro examples · stdio + HTTP (streamable) transports · MIT licensed · containerized · deployed at [mcp.huynhvantuan.net/reactflow](https://mcp.huynhvantuan.net/reactflow).
 
 ## What's inside
 

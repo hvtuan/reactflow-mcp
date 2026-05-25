@@ -83,17 +83,20 @@ def _client_endpoint_url(request: Request) -> str:
 
 def _build_markdown(endpoint_url: str) -> str:
     tools = [
-        ("reactflow_search_docs", "Scored full-text search over the bundled React Flow deep-dive doc."),
-        ("reactflow_get_api", "Structured lookup of a single API symbol (kind, signature, props, deprecation)."),
-        ("reactflow_lookup_v11_v12", "Translate v10/v11 React Flow symbol → v12 equivalent."),
-        ("reactflow_list_pro_examples", "List React Flow Pro paid examples + pricing + license notes."),
-        ("reactflow_svelte_equivalent", "Map a React Flow symbol → Svelte Flow equivalent + porting notes."),
-        ("reactflow_scaffold_custom_node", "Generate TSX for a custom React Flow node component."),
-        ("reactflow_scaffold_custom_edge", "Generate TSX for a custom React Flow edge component."),
-        ("reactflow_scaffold_flow", "Generate a complete working TSX app from a nodes/edges spec (+ optional dagre auto-layout)."),
-        ("reactflow_list_recipes", "List OSS recipes that clone React Flow Pro examples (auto-layout, undo/redo, helper lines, …)."),
-        ("reactflow_get_recipe", "Full copy-paste TSX for a Pro-pattern recipe (12 currently — most paid Pro examples covered)."),
-        ("reactflow_validate_flow", "Lint a flow JSON for v12 correctness (errors + warnings + stats)."),
+        ("reactflow_search_docs", "Scored full-text search over the bundled deep-dive doc."),
+        ("reactflow_get_api", "Structured lookup of a single API symbol (113 covered)."),
+        ("reactflow_lookup_v11_v12", "Translate v10/v11 symbol → v12 equivalent."),
+        ("reactflow_list_pro_examples", "List Pro paid examples + pricing + license."),
+        ("reactflow_svelte_equivalent", "Map React Flow symbol → Svelte Flow + porting notes."),
+        ("reactflow_scaffold_custom_node", "TSX scaffold for a custom node component."),
+        ("reactflow_scaffold_custom_edge", "TSX scaffold for a custom edge component."),
+        ("reactflow_scaffold_flow", "TSX scaffold for a full single-file flow app."),
+        ("reactflow_scaffold_workflow_app", "Multi-file Vite/Next.js starter (Pro template clone)."),
+        ("reactflow_list_recipes", "Index of 19 OSS recipes cloning Pro examples."),
+        ("reactflow_get_recipe", "Full copy-paste TSX for an OSS recipe."),
+        ("reactflow_render_flow", "Render flow JSON to Mermaid or ASCII tree."),
+        ("reactflow_explain_change", "Explain a NodeChange/EdgeChange in plain English."),
+        ("reactflow_validate_flow", "Lint a flow JSON for v12 correctness."),
     ]
     tool_rows = "\n".join(f"| `{name}` | {desc} |" for name, desc in tools)
 
@@ -105,8 +108,9 @@ def _build_markdown(endpoint_url: str) -> str:
 MCP server giving LLMs first-class knowledge of **React Flow** (`@xyflow/react` v12) and **Svelte Flow** (`@xyflow/svelte`).
 Closes the gap between training-data drift and the current API: surfaces hooks/components/utils/types, v11→v12 migrations, Pro feature catalog, cross-framework symbol mapping, code generators, and a flow JSON linter.
 
-- **Endpoint** (this URL, POST only): `{endpoint_url}`
-- **Transport:** streamable-HTTP (JSON-RPC body, stateless)
+- **Endpoint** (POST JSON-RPC): `{endpoint_url}`
+- **Health:** `GET /health` · **Version + stats:** `GET /version`
+- **Transport:** streamable-HTTP (stateless, JSON body, no SSE)
 - **Source:** [github.com/hvtuan/reactflow-mcp](https://github.com/hvtuan/reactflow-mcp) · MIT
 
 ---
