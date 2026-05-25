@@ -90,11 +90,13 @@ MCP client config for the hosted endpoint:
 {
   "mcpServers": {
     "reactflow": {
-      "url": "https://reactflow-mcp.example.com/mcp"
+      "url": "https://mcp.huynhvantuan.net/reactflow/mcp"
     }
   }
 }
 ```
+
+> **Path-based multi-MCP host** — this server is deployed as one of many MCPs under a single domain (`mcp.huynhvantuan.net/<service>/mcp`). Coolify's Traefik auto-strips the `<service>` prefix, so the container keeps serving at the default `/mcp` path. Adding a new MCP requires only a new Coolify app with FQDN `https://mcp.<host>/<name>` — no DNS or tunnel changes.
 
 ## Tools
 
