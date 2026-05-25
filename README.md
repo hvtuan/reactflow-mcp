@@ -3,7 +3,7 @@
 MCP server giving LLMs first-class knowledge of **React Flow** (`@xyflow/react` v12) and **Svelte Flow** (`@xyflow/svelte`).
 Closes the gap between training-data drift and the current API: surfaces hooks/components/utils/types, v11→v12 migrations, Pro feature catalog, cross-framework symbol mapping, code generators, and a flow JSON linter.
 
-> Status: **v0.2.0** — 8 tools + 1 resource, stdio transport, MIT licensed.
+> Status: **v0.3.0** — 8 tools + 1 resource · stdio + HTTP (streamable) transports · MIT licensed · containerized.
 
 ## What's inside
 
@@ -38,14 +38,14 @@ Requires Python ≥ 3.10.
 
 ## Run
 
+### Local (stdio — default)
+
 ```bash
 .venv/bin/python -m reactflow_mcp        # or the console script:
 .venv/bin/reactflow-mcp
 ```
 
-Speaks **stdio MCP** — wire into any MCP-aware client.
-
-### Claude Code
+Wire into any MCP-aware client (Claude Code, Cursor, …).
 
 ```json
 {
@@ -53,6 +53,44 @@ Speaks **stdio MCP** — wire into any MCP-aware client.
     "reactflow": {
       "command": "/abs/path/to/reactflow-mcp/.venv/bin/python",
       "args": ["-m", "reactflow_mcp"]
+    }
+  }
+}
+```
+
+### HTTP (streamable) — for remote / hosted deploys
+
+```bash
+MCP_TRANSPORT=streamable-http MCP_HOST=0.0.0.0 MCP_PORT=8000 \
+  .venv/bin/python -m reactflow_mcp
+# → POST http://localhost:8000/mcp  (JSON-RPC body)
+```
+
+| env var | default | notes |
+|---|---|---|
+| `MCP_TRANSPORT` | `stdio` | `stdio` \| `streamable-http` \| `sse` |
+| `MCP_HOST` | `127.0.0.1` | bind addr; use `0.0.0.0` in containers |
+| `MCP_PORT` | `8000` | HTTP port |
+| `MCP_HTTP_PATH` | `/mcp` | HTTP route |
+| `MCP_STATELESS_HTTP` | `true` | LB-friendly (no session pinning) |
+| `MCP_JSON_RESPONSE` | `true` | plain JSON body instead of SSE stream |
+
+### Docker / Coolify
+
+```bash
+docker build -t reactflow-mcp .
+docker run -p 8000:8000 reactflow-mcp
+```
+
+Image defaults to `streamable-http` + `0.0.0.0:8000` + stateless JSON. Healthcheck = TCP probe on 8000. Drop in any container platform (Coolify, Fly, Render, ECS).
+
+MCP client config for the hosted endpoint:
+
+```json
+{
+  "mcpServers": {
+    "reactflow": {
+      "url": "https://reactflow-mcp.example.com/mcp"
     }
   }
 }

@@ -17,6 +17,7 @@ Resource:
 from __future__ import annotations
 
 import json
+import os
 import re
 from enum import Enum
 from importlib import resources
@@ -106,7 +107,19 @@ def _format_response(payload: dict, fmt: ResponseFormat, markdown_renderer) -> s
 
 # ───────────────────────── MCP server ─────────────────────────
 
-mcp = FastMCP(SERVER_NAME)
+# Construct the server with HTTP-transport-friendly defaults read from env.
+# When running over stdio the host/port/path settings are simply ignored.
+mcp = FastMCP(
+    SERVER_NAME,
+    host=os.environ.get("MCP_HOST", "127.0.0.1"),
+    port=int(os.environ.get("MCP_PORT", "8000")),
+    streamable_http_path=os.environ.get("MCP_HTTP_PATH", "/mcp"),
+    # Stateless + json_response are friendlier for load-balanced HTTP deploys
+    # (Coolify / Traefik etc.) — no per-session state to pin to a pod, and
+    # the response is a plain JSON-RPC body instead of an SSE stream.
+    stateless_http=os.environ.get("MCP_STATELESS_HTTP", "true").lower() == "true",
+    json_response=os.environ.get("MCP_JSON_RESPONSE", "true").lower() == "true",
+)
 
 
 # ─────────── tool 1: search_docs ───────────
