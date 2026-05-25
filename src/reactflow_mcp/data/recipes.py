@@ -951,6 +951,634 @@ export async function flowToPng(nodes: Node[], edges: Edge[], width = 1200, heig
         ],
     },
 
+    "collaborative_yjs": {
+        "title": "Collaborative editing (Yjs)",
+        "category": "interaction",
+        "clones_pro": "Collaborative",
+        "summary": "Real-time multi-user flow editing — shared nodes/edges via Yjs CRDT + presence cursors via awareness.",
+        "problem": "Multiple users edit the same flow simultaneously; need conflict-free merge + see each other's cursors.",
+        "approach": "Mirror Y.Array<Y.Map> ↔ React Flow state. On local change → write to Y. On Y observe → setNodes/setEdges. Use y-websocket (self-host) or y-webrtc. Awareness API broadcasts ephemeral cursor positions.",
+        "apis_used": ["useReactFlow", "useOnSelectionChange", "Panel"],
+        "deps": ["yjs", "y-websocket", "y-protocols"],
+        "files": {
+            "useYflow.ts": """\
+import { useEffect, useState } from 'react';
+import * as Y from 'yjs';
+import { WebsocketProvider } from 'y-websocket';
+import type { Node, Edge } from '@xyflow/react';
+
+const doc = new Y.Doc();
+export const provider = new WebsocketProvider(
+  import.meta.env.VITE_YJS_URL ?? 'ws://localhost:1234',
+  'reactflow-room',
+  doc,
+);
+
+const yNodes = doc.getArray<Y.Map<any>>('nodes');
+const yEdges = doc.getArray<Y.Map<any>>('edges');
+
+function yMapToObject<T>(m: Y.Map<any>): T {
+  const o: any = {};
+  m.forEach((v, k) => (o[k] = v instanceof Y.Map ? yMapToObject(v) : v));
+  return o as T;
+}
+
+function objectToYMap(o: any): Y.Map<any> {
+  const m = new Y.Map();
+  for (const [k, v] of Object.entries(o)) {
+    m.set(k, v && typeof v === 'object' && !Array.isArray(v) ? objectToYMap(v) : v);
+  }
+  return m;
+}
+
+export function useSharedFlow(): {
+  nodes: Node[]; edges: Edge[];
+  setNodes: (ns: Node[]) => void; setEdges: (es: Edge[]) => void;
+} {
+  const [nodes, setNodes] = useState<Node[]>(() => yNodes.toArray().map((m) => yMapToObject<Node>(m)));
+  const [edges, setEdges] = useState<Edge[]>(() => yEdges.toArray().map((m) => yMapToObject<Edge>(m)));
+
+  useEffect(() => {
+    const onNodes = () => setNodes(yNodes.toArray().map((m) => yMapToObject<Node>(m)));
+    const onEdges = () => setEdges(yEdges.toArray().map((m) => yMapToObject<Edge>(m)));
+    yNodes.observeDeep(onNodes);
+    yEdges.observeDeep(onEdges);
+    return () => {
+      yNodes.unobserveDeep(onNodes);
+      yEdges.unobserveDeep(onEdges);
+    };
+  }, []);
+
+  const writeNodes = (next: Node[]) => {
+    doc.transact(() => {
+      yNodes.delete(0, yNodes.length);
+      yNodes.push(next.map(objectToYMap));
+    });
+  };
+  const writeEdges = (next: Edge[]) => {
+    doc.transact(() => {
+      yEdges.delete(0, yEdges.length);
+      yEdges.push(next.map(objectToYMap));
+    });
+  };
+
+  return { nodes, edges, setNodes: writeNodes, setEdges: writeEdges };
+}
+""",
+            "Cursors.tsx": """\
+import { useEffect, useState } from 'react';
+import { useReactFlow } from '@xyflow/react';
+import { provider } from './useYflow';
+
+type Cursor = { clientId: number; user: { name: string; color: string }; x: number; y: number };
+
+export function Cursors() {
+  const { flowToScreenPosition } = useReactFlow();
+  const [cursors, setCursors] = useState<Cursor[]>([]);
+
+  useEffect(() => {
+    const onMove = (e: PointerEvent) => {
+      provider.awareness.setLocalStateField('cursor', { x: e.clientX, y: e.clientY });
+    };
+    window.addEventListener('pointermove', onMove);
+
+    const update = () => {
+      const states = Array.from(provider.awareness.getStates().entries());
+      setCursors(states
+        .filter(([id]) => id !== provider.awareness.clientID)
+        .map(([clientId, s]: any) => ({ clientId, ...s.cursor, user: s.user ?? { name: 'anon', color: '#888' } }))
+        .filter((c) => typeof c.x === 'number'),
+      );
+    };
+    provider.awareness.on('change', update);
+    update();
+    return () => {
+      window.removeEventListener('pointermove', onMove);
+      provider.awareness.off('change', update);
+    };
+  }, []);
+
+  return (
+    <>
+      {cursors.map((c) => (
+        <div key={c.clientId} style={{
+          position: 'fixed', left: c.x, top: c.y, pointerEvents: 'none', zIndex: 9999,
+          transform: 'translate(2px, 2px)',
+        }}>
+          <svg width="12" height="18" viewBox="0 0 12 18"><path d="M0 0 L0 14 L4 11 L7 17 L9 16 L6 10 L11 10 Z" fill={c.user.color} stroke="white" /></svg>
+          <div style={{ background: c.user.color, color: 'white', fontSize: 10, padding: '2px 6px', borderRadius: 4, marginTop: 2 }}>{c.user.name}</div>
+        </div>
+      ))}
+    </>
+  );
+}
+""",
+            "App.tsx.snippet": """\
+function Flow() {
+  const { nodes, edges, setNodes, setEdges } = useSharedFlow();
+  // ... wire onNodesChange / onEdgesChange / onConnect to setNodes/setEdges
+  return (
+    <>
+      <ReactFlow nodes={nodes} edges={edges} onNodesChange={...}>
+        <Background /><Controls />
+      </ReactFlow>
+      <Cursors />
+    </>
+  );
+}
+""",
+        },
+        "gotchas": [
+            "Self-host y-websocket: `npx y-websocket` for dev, or run `y-websocket-server` in production (Docker image exists). Persist to disk with `--persist`.",
+            "DON'T sync ephemeral fields (`selected`, `dragging`, `measured`) — they flap and create huge undo histories. Filter before writing to Y.",
+            "Awareness state is per-tab. Set unique color + name on connect (e.g. via Liveblocks-style randomColor()).",
+            "For large flows: switch from `yNodes.delete + push` (full sync) to per-node Y.Map updates to avoid O(n) writes per change.",
+        ],
+        "references": [
+            "https://docs.yjs.dev/",
+            "https://github.com/yjs/y-websocket",
+        ],
+    },
+
+    "libavoid_orthogonal_routing": {
+        "title": "Orthogonal edge routing (libavoid)",
+        "category": "edges",
+        "clones_pro": "libavoid Edge Routing",
+        "summary": "Smart orthogonal/right-angle edge routing that avoids node overlaps — like draw.io / lucidchart connectors.",
+        "problem": "smoothstep edges go through other nodes when graph is dense; need true obstacle-avoiding orthogonal paths.",
+        "approach": "Use `libavoid-js` (WASM port of Adaptagrams libavoid). Build a Router, register each node as a ShapeRef, register each edge as a ConnRef with endpoint connection-pins, call router.processTransaction(). Convert resulting checkpoint list back to SVG path. Custom edge component renders that path via <BaseEdge>.",
+        "apis_used": ["BaseEdge", "EdgeProps", "useReactFlow", "useNodesInitialized"],
+        "deps": ["libavoid-js"],
+        "files": {
+            "useLibavoidRouter.ts": """\
+import { useEffect, useRef } from 'react';
+import { useReactFlow, useNodesInitialized, type Node, type Edge } from '@xyflow/react';
+// @ts-expect-error libavoid-js has no bundled types
+import { AvoidLib } from 'libavoid-js';
+
+type Path = { id: string; d: string };
+
+const routes = new Map<string, string>();
+let router: any = null;
+let Avoid: any = null;
+
+async function ensureAvoid() {
+  if (Avoid) return Avoid;
+  await AvoidLib.load();
+  Avoid = AvoidLib.getInstance();
+  router = new Avoid.Router(Avoid.OrthogonalRouting);
+  router.setRoutingParameter(Avoid.idealNudgingDistance, 10);
+  return Avoid;
+}
+
+export async function reroute(nodes: Node[], edges: Edge[]): Promise<Path[]> {
+  await ensureAvoid();
+  // Clear previous transaction state
+  for (const obj of router.objectsByID.values()) router.deleteObject(obj);
+
+  const shapes = new Map<string, any>();
+  for (const n of nodes) {
+    const w = n.measured?.width ?? 150;
+    const h = n.measured?.height ?? 40;
+    const rect = new Avoid.Rectangle(
+      new Avoid.Point(n.position.x, n.position.y),
+      new Avoid.Point(n.position.x + w, n.position.y + h),
+    );
+    const shape = new Avoid.ShapeRef(router, rect);
+    shapes.set(n.id, { shape, w, h, pos: n.position });
+  }
+
+  const conns: any[] = [];
+  for (const e of edges) {
+    const s = shapes.get(e.source), t = shapes.get(e.target);
+    if (!s || !t) continue;
+    const srcPin = new Avoid.ConnEnd(
+      new Avoid.Point(s.pos.x + s.w / 2, s.pos.y + s.h),
+    );
+    const tgtPin = new Avoid.ConnEnd(
+      new Avoid.Point(t.pos.x + t.w / 2, t.pos.y),
+    );
+    const conn = new Avoid.ConnRef(router, srcPin, tgtPin);
+    conns.push({ id: e.id, conn });
+  }
+
+  router.processTransaction();
+
+  return conns.map(({ id, conn }) => {
+    const route = conn.displayRoute();
+    let d = '';
+    for (let i = 0; i < route.size(); i++) {
+      const p = route.get_ps(i);
+      d += (i === 0 ? 'M ' : 'L ') + p.x + ' ' + p.y + ' ';
+    }
+    return { id, d: d.trim() };
+  });
+}
+
+export function useLibavoidRouting() {
+  const { getNodes, getEdges, setEdges } = useReactFlow();
+  const initialized = useNodesInitialized();
+  const dirty = useRef(0);
+
+  useEffect(() => {
+    if (!initialized) return;
+    dirty.current++;
+    const my = dirty.current;
+    reroute(getNodes(), getEdges()).then((paths) => {
+      if (my !== dirty.current) return;
+      paths.forEach((p) => routes.set(p.id, p.d));
+      setEdges((es) => es.map((e) => ({ ...e, data: { ...e.data, libavoidD: routes.get(e.id) } })));
+    });
+  }, [initialized, getNodes, getEdges, setEdges]);
+}
+
+export function getLibavoidPath(edgeId: string): string | undefined {
+  return routes.get(edgeId);
+}
+""",
+            "LibavoidEdge.tsx": """\
+import { BaseEdge, type EdgeProps } from '@xyflow/react';
+import { getLibavoidPath } from './useLibavoidRouter';
+
+export function LibavoidEdge({ id, data, sourceX, sourceY, targetX, targetY, markerEnd }: EdgeProps<{ data?: { libavoidD?: string } }>) {
+  const d = data?.libavoidD ?? `M ${sourceX} ${sourceY} L ${targetX} ${targetY}`;
+  return <BaseEdge id={id} path={d} markerEnd={markerEnd} />;
+}
+""",
+        },
+        "gotchas": [
+            "libavoid-js is a WASM bundle (~250kb gzipped) — load lazily; first call triggers WASM init.",
+            "Re-run reroute() after every node move/add/delete (not just initial). Throttle to e.g. onNodeDragStop to avoid recompute per pixel.",
+            "ConnEnd pin locations: choose top/bottom/left/right midpoints based on handle positions, not center, or routes will start inside nodes.",
+            "Memory: libavoid objects must be deleted (router.deleteObject) between transactions or memory leaks per re-route.",
+        ],
+        "references": [
+            "https://github.com/Aksem/libavoid-js",
+            "https://www.adaptagrams.org/documentation/libavoid.html",
+        ],
+    },
+
+    "dynamic_layouting": {
+        "title": "Dynamic layouting with placeholder nodes",
+        "category": "layout",
+        "clones_pro": "Dynamic Layouting",
+        "summary": "Vertical tree flow that auto-arranges around dashed 'placeholder' nodes — clicking a placeholder replaces it with a real node.",
+        "problem": "Need a 'click + to add node here' UX where the placeholders show valid insertion points and the tree re-layouts on insert.",
+        "approach": "Each real node has implicit `+` placeholder children at each empty handle. Render placeholders as dashed nodes (custom node type). On click, replace the placeholder with a real node + spawn new placeholders. Re-run dagre after each mutation.",
+        "apis_used": ["useReactFlow", "useNodesInitialized", "useNodesState", "useEdgesState"],
+        "deps": ["@dagrejs/dagre"],
+        "files": {
+            "PlaceholderNode.tsx": """\
+import { Handle, Position, useReactFlow, type NodeProps } from '@xyflow/react';
+
+export function PlaceholderNode({ id, data }: NodeProps<{ data: { parentId: string } }>) {
+  const { setNodes, setEdges } = useReactFlow();
+  const onClick = () => {
+    const newId = `n-${Date.now()}`;
+    setNodes((ns) => [
+      ...ns.filter((n) => n.id !== id),
+      { id: newId, type: 'default', position: { x: 0, y: 0 }, data: { label: 'New node' } },
+      // spawn fresh placeholder under the new node
+      { id: `${newId}-ph`, type: 'placeholder', position: { x: 0, y: 0 }, data: { parentId: newId } },
+    ]);
+    setEdges((es) => [
+      ...es.filter((e) => e.target !== id),
+      { id: `${data.parentId}-${newId}`, source: data.parentId, target: newId },
+      { id: `${newId}-${newId}-ph`, source: newId, target: `${newId}-ph`, style: { strokeDasharray: '4 4' } },
+    ]);
+  };
+  return (
+    <div onClick={onClick} style={{
+      width: 100, height: 30,
+      border: '2px dashed #94a3b8', borderRadius: 6,
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      fontSize: 18, color: '#64748b', cursor: 'pointer', background: 'white',
+    }}>+
+      <Handle type="target" position={Position.Top} />
+    </div>
+  );
+}
+""",
+            "App.tsx.snippet": """\
+import { useAutoLayout } from './useAutoLayout';   // from auto_layout_dagre recipe
+import { PlaceholderNode } from './PlaceholderNode';
+
+const nodeTypes = { placeholder: PlaceholderNode };
+const initialNodes = [
+  { id: 'root', type: 'input', position: { x: 0, y: 0 }, data: { label: 'Start' } },
+  { id: 'root-ph', type: 'placeholder', position: { x: 0, y: 100 }, data: { parentId: 'root' } },
+];
+const initialEdges = [
+  { id: 'root-ph-edge', source: 'root', target: 'root-ph', style: { strokeDasharray: '4 4' } },
+];
+
+function Flow() {
+  useAutoLayout('TB');
+  // ... standard useNodesState / useEdgesState wiring
+}
+
+export default function App() {
+  return <ReactFlowProvider><Flow /></ReactFlowProvider>;
+}
+""",
+        },
+        "gotchas": [
+            "Placeholder edges should be visually distinct (dashed). Easiest: `style={{ strokeDasharray: '4 4' }}` on the edge.",
+            "Don't include placeholders in graph-export (toObject()) — filter by `n.type !== 'placeholder'` before serializing.",
+            "After insert, re-layout runs via useAutoLayout's `useNodesInitialized` flip — but you may need to force re-run with a layout trigger ref if the dependency array doesn't re-fire.",
+        ],
+        "references": [],
+    },
+
+    "dynamic_grouping": {
+        "title": "Dynamic grouping (drag-into-container)",
+        "category": "grouping",
+        "clones_pro": "Dynamic Grouping",
+        "summary": "Drag a node into a group node and it auto-becomes a child (parentId set + position rebased); drag out and it detaches.",
+        "problem": "Selection-grouping (shortcut) is fine but users also want intuitive drag-in / drag-out semantics like Figma frames.",
+        "approach": "Listen `onNodeDragStop`. Use `getIntersectingNodes` to find the deepest group node the dragged node now overlaps. If different from current parent → reparent (rewrite parentId + relative position). If dragged outside any group → null parentId + absolute position.",
+        "apis_used": ["useReactFlow", "getIntersectingNodes"],
+        "deps": [],
+        "files": {
+            "useDragIntoGroup.ts": """\
+import { useCallback } from 'react';
+import { useReactFlow, type Node } from '@xyflow/react';
+
+export function useDragIntoGroup() {
+  const { getNodes, setNodes, getIntersectingNodes } = useReactFlow();
+
+  return useCallback((_e: React.MouseEvent, dragged: Node) => {
+    // exclude self + non-groups
+    const overlaps = getIntersectingNodes(dragged).filter((n) => n.type === 'group' && n.id !== dragged.id);
+    const newParent = overlaps[overlaps.length - 1];   // deepest = last in array
+    const currentParentId = dragged.parentId ?? null;
+    const targetParentId = newParent?.id ?? null;
+    if (currentParentId === targetParentId) return;
+
+    setNodes((ns) => {
+      const oldParent = currentParentId ? ns.find((n) => n.id === currentParentId) : null;
+      const next = ns.map((n) => {
+        if (n.id !== dragged.id) return n;
+        if (targetParentId && newParent) {
+          // moving INTO group: convert absolute → relative
+          const absX = (oldParent ? oldParent.position.x : 0) + dragged.position.x;
+          const absY = (oldParent ? oldParent.position.y : 0) + dragged.position.y;
+          return {
+            ...n,
+            parentId: targetParentId,
+            extent: 'parent' as const,
+            position: { x: absX - newParent.position.x, y: absY - newParent.position.y },
+          };
+        }
+        // moving OUT of group: convert relative → absolute
+        const absX = (oldParent ? oldParent.position.x : 0) + dragged.position.x;
+        const absY = (oldParent ? oldParent.position.y : 0) + dragged.position.y;
+        return { ...n, parentId: undefined, extent: undefined, position: { x: absX, y: absY } };
+      });
+
+      // re-sort to keep parents before children
+      const groups = next.filter((n) => n.type === 'group');
+      const others = next.filter((n) => n.type !== 'group');
+      return [...groups, ...others];
+    });
+  }, [getNodes, setNodes, getIntersectingNodes]);
+}
+""",
+            "App.tsx.snippet": """\
+function Flow() {
+  const onNodeDragStop = useDragIntoGroup();
+  return <ReactFlow nodes={nodes} edges={edges} onNodeDragStop={onNodeDragStop} … />;
+}
+""",
+        },
+        "gotchas": [
+            "getIntersectingNodes uses BBOX — for non-rect group shapes you need a custom hit test.",
+            "After re-sorting (parents first), node order changes — pair with stable React keys (Node already has `id`).",
+            "Don't allow nesting groups inside themselves (filter `n.id !== dragged.id` AND walk parentId chain to detect ancestor cycles).",
+        ],
+        "references": [],
+    },
+
+    "freehand_draw": {
+        "title": "Freehand draw mode",
+        "category": "interaction",
+        "clones_pro": "Freehand Draw",
+        "summary": "Toggle 'draw' mode in toolbar; pointer-drag on empty canvas creates a freehand-shape node (smoothed SVG path).",
+        "problem": "Whiteboard-style annotation — want users to sketch arrows / circles / highlights directly on the canvas without dragging nodes.",
+        "approach": "Mode state (draw vs select). In draw mode, `<ReactFlow panOnDrag={false}>` so canvas doesn't pan. On pointer down/move on the `<Pane>`, collect points. On up, smooth points (perfect-freehand or Catmull-Rom-to-Bezier) and create a custom 'freehand' node whose data is the path.",
+        "apis_used": ["ReactFlow.panOnDrag", "useReactFlow", "Panel", "NodeProps", "Handle"],
+        "deps": ["perfect-freehand"],
+        "files": {
+            "FreehandNode.tsx": """\
+import { type NodeProps } from '@xyflow/react';
+import { getStroke } from 'perfect-freehand';
+
+type Data = { points: number[][]; color: string };
+
+export function FreehandNode({ data, selected }: NodeProps<{ data: Data }>) {
+  const stroke = getStroke(data.points, { size: 4, smoothing: 0.5, thinning: 0.5 });
+  const d = stroke.length
+    ? 'M ' + stroke.map(([x, y]) => `${x} ${y}`).join(' L ') + ' Z'
+    : '';
+  // bbox to set node width/height
+  const xs = data.points.map((p) => p[0]);
+  const ys = data.points.map((p) => p[1]);
+  const minX = Math.min(...xs), minY = Math.min(...ys);
+  const maxX = Math.max(...xs), maxY = Math.max(...ys);
+  return (
+    <svg
+      width={maxX - minX} height={maxY - minY}
+      viewBox={`${minX} ${minY} ${maxX - minX} ${maxY - minY}`}
+      style={{ overflow: 'visible' }}
+    >
+      <path d={d} fill={data.color} stroke={selected ? '#3b82f6' : 'transparent'} strokeWidth={1} />
+    </svg>
+  );
+}
+""",
+            "useDrawMode.ts": """\
+import { useCallback, useRef, useState } from 'react';
+import { useReactFlow, type Node } from '@xyflow/react';
+
+export type Mode = 'select' | 'draw';
+
+export function useDrawMode(initial: Mode = 'select') {
+  const [mode, setMode] = useState<Mode>(initial);
+  const { addNodes, screenToFlowPosition } = useReactFlow();
+  const points = useRef<number[][]>([]);
+  const drawing = useRef(false);
+
+  const onPaneMouseDown = useCallback((e: React.PointerEvent) => {
+    if (mode !== 'draw') return;
+    drawing.current = true;
+    points.current = [];
+    const p = screenToFlowPosition({ x: e.clientX, y: e.clientY });
+    points.current.push([p.x, p.y, e.pressure || 0.5]);
+  }, [mode, screenToFlowPosition]);
+
+  const onPaneMouseMove = useCallback((e: React.PointerEvent) => {
+    if (!drawing.current) return;
+    const p = screenToFlowPosition({ x: e.clientX, y: e.clientY });
+    points.current.push([p.x, p.y, e.pressure || 0.5]);
+  }, [screenToFlowPosition]);
+
+  const onPaneMouseUp = useCallback(() => {
+    if (!drawing.current || points.current.length < 3) {
+      drawing.current = false;
+      return;
+    }
+    drawing.current = false;
+    const xs = points.current.map((p) => p[0]);
+    const ys = points.current.map((p) => p[1]);
+    const node: Node = {
+      id: `draw-${Date.now()}`,
+      type: 'freehand',
+      position: { x: Math.min(...xs), y: Math.min(...ys) },
+      data: { points: points.current.slice(), color: '#1e293b' },
+      selectable: true,
+    };
+    addNodes([node]);
+    points.current = [];
+  }, [addNodes]);
+
+  return { mode, setMode, onPaneMouseDown, onPaneMouseMove, onPaneMouseUp };
+}
+""",
+            "App.tsx.snippet": """\
+function Flow() {
+  const draw = useDrawMode('select');
+  return (
+    <ReactFlow
+      nodes={nodes} edges={edges}
+      nodeTypes={{ freehand: FreehandNode }}
+      panOnDrag={draw.mode === 'select'}
+      onPaneMouseMove={draw.onPaneMouseMove}
+      onPaneMouseUp={draw.onPaneMouseUp}
+      // onPaneMouseDown is not a built-in prop — attach to wrapper div instead
+    >
+      <Panel position="top-left">
+        <button onClick={() => draw.setMode(draw.mode === 'draw' ? 'select' : 'draw')}>
+          {draw.mode === 'draw' ? '✎ drawing' : '☝ select'}
+        </button>
+      </Panel>
+    </ReactFlow>
+  );
+}
+""",
+        },
+        "gotchas": [
+            "React Flow has no `onPaneMouseDown` — attach pointerdown to a wrapper div around <ReactFlow> instead.",
+            "Toggle `panOnDrag={false}` while in draw mode so drag-on-pane doesn't pan the canvas.",
+            "Convert ALL pointer coords with `screenToFlowPosition` — using raw clientX/Y drifts on pan/zoom.",
+            "Freehand nodes interfere with edge connection drags. Either disable `connectable` on freehand nodes or render them BEHIND the rest (`zIndex: -1`).",
+        ],
+        "references": [
+            "https://github.com/steveruizok/perfect-freehand",
+        ],
+    },
+
+    "helper_lines_advanced": {
+        "title": "Helper lines v2 (viewport-aware)",
+        "category": "interaction",
+        "clones_pro": "Helper Lines (advanced)",
+        "summary": "Upgrade of the basic helper_lines recipe — lines render in the transformed viewport (pan/zoom correct) and threshold scales inversely with zoom.",
+        "problem": "Basic helper_lines recipe renders guide lines at fixed screen coords — they drift when the user pans or zooms. Also snap threshold feels off at extreme zooms.",
+        "approach": "Same snap math as helper_lines, but render guide lines inside `<ViewportPortal>` (which is part of the transformed flow space). Threshold = `SNAP_PX / zoom` so a 5px snap stays 5 screen pixels regardless of zoom.",
+        "apis_used": ["NodeChange", "applyNodeChanges", "ViewportPortal", "useStore"],
+        "deps": [],
+        "files": {
+            "helperLinesV2.ts": """\
+import type { Node, NodePositionChange, XYPosition } from '@xyflow/react';
+
+const SNAP_PX_SCREEN = 5;
+
+export type HelperLines = { x: number | null; y: number | null };
+
+export function getHelperLinesV2(
+  change: NodePositionChange,
+  nodes: Node[],
+  zoom: number,
+): { lines: HelperLines; snap: XYPosition } {
+  const target = nodes.find((n) => n.id === change.id);
+  if (!target || !change.position) return { lines: { x: null, y: null }, snap: change.position ?? { x: 0, y: 0 } };
+
+  const threshold = SNAP_PX_SCREEN / zoom;   // flow-units that look like 5px on screen
+  const tw = target.measured?.width ?? 0;
+  const th = target.measured?.height ?? 0;
+  const targetLefts = [change.position.x, change.position.x + tw / 2, change.position.x + tw];
+  const targetTops = [change.position.y, change.position.y + th / 2, change.position.y + th];
+
+  let snapX = change.position.x, snapY = change.position.y;
+  let lineX: number | null = null, lineY: number | null = null;
+  let bestDx = threshold, bestDy = threshold;
+
+  for (const n of nodes) {
+    if (n.id === target.id) continue;
+    const w = n.measured?.width ?? 0;
+    const h = n.measured?.height ?? 0;
+    const otherLefts = [n.position.x, n.position.x + w / 2, n.position.x + w];
+    const otherTops = [n.position.y, n.position.y + h / 2, n.position.y + h];
+    for (let i = 0; i < 3; i++) {
+      for (let j = 0; j < 3; j++) {
+        const dx = Math.abs(targetLefts[i] - otherLefts[j]);
+        if (dx < bestDx) { bestDx = dx; snapX = otherLefts[j] - [0, tw / 2, tw][i]; lineX = otherLefts[j]; }
+        const dy = Math.abs(targetTops[i] - otherTops[j]);
+        if (dy < bestDy) { bestDy = dy; snapY = otherTops[j] - [0, th / 2, th][i]; lineY = otherTops[j]; }
+      }
+    }
+  }
+
+  return { lines: { x: lineX, y: lineY }, snap: { x: snapX, y: snapY } };
+}
+""",
+            "App.tsx.snippet": """\
+import { ReactFlow, applyNodeChanges, ViewportPortal, useStore, useNodesState } from '@xyflow/react';
+import { useState, useCallback } from 'react';
+import { getHelperLinesV2 } from './helperLinesV2';
+
+function Flow() {
+  const [nodes, setNodes] = useNodesState(initialNodes);
+  const [lines, setLines] = useState({ x: null, y: null });
+  const zoom = useStore((s) => s.transform[2]);
+
+  const onNodesChange = useCallback((changes) => {
+    let next = { x: null, y: null };
+    const patched = changes.map((c) => {
+      if (c.type === 'position' && c.dragging && c.position) {
+        const { lines, snap } = getHelperLinesV2(c, nodes, zoom);
+        next = lines;
+        return { ...c, position: snap };
+      }
+      return c;
+    });
+    setLines(next);
+    setNodes((ns) => applyNodeChanges(patched, ns));
+  }, [nodes, zoom]);
+
+  return (
+    <ReactFlow nodes={nodes} onNodesChange={onNodesChange} fitView>
+      <ViewportPortal>
+        {lines.x !== null && (
+          <div style={{ position: 'absolute', left: lines.x, top: -100000, width: 1 / zoom, height: 200000, background: '#3b82f6' }} />
+        )}
+        {lines.y !== null && (
+          <div style={{ position: 'absolute', top: lines.y, left: -100000, height: 1 / zoom, width: 200000, background: '#3b82f6' }} />
+        )}
+      </ViewportPortal>
+    </ReactFlow>
+  );
+}
+""",
+        },
+        "gotchas": [
+            "Lines inside <ViewportPortal> are in FLOW coordinates — multiply width/height by `1/zoom` so they stay 1px on screen at any zoom.",
+            "Use VERY large extents (`-100000` to `+100000`) for line length — viewport portal clips at flow bounds, not viewport bounds.",
+            "Read zoom from useStore selector (`s.transform[2]`) — `useViewport().zoom` also works but causes more re-renders.",
+            "Snap threshold scales by 1/zoom so 5 screen-pixels stays 5 screen-pixels regardless of zoom level.",
+        ],
+        "references": [],
+    },
+
     "remove_attribution": {
         "title": "Remove attribution badge",
         "category": "misc",
@@ -971,7 +1599,7 @@ export async function flowToPng(nodes: Node[], edges: Edge[], width = 1200, heig
 """,
         },
         "gotchas": [
-            "For commercial use the xyflow team requests you either keep the badge or subscribe to React Flow Pro / sponsor on GitHub to fund OSS maintenance.",
+            "The xyflow team treats this as a moral/funding ask, not a license obligation — `proOptions.hideAttribution: true` works for anyone. If you appreciate the OSS work, sponsor via GitHub Sponsors.",
         ],
         "references": [
             "https://reactflow.dev/learn/troubleshooting/remove-attribution",
