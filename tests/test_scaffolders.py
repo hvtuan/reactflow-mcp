@@ -1,6 +1,6 @@
 import pytest
 
-from reactflow_mcp.scaffolders import scaffold_custom_edge, scaffold_custom_node
+from reactflow_mcp.scaffolders import scaffold_custom_edge, scaffold_custom_node, scaffold_flow
 
 
 # ─── node ───
@@ -117,3 +117,80 @@ def test_edge_label_with_renderer():
 def test_edge_path_type_validation():
     with pytest.raises(ValueError, match="path_type"):
         scaffold_custom_edge(name="E", path_type="zigzag")
+
+
+# ─── full flow scaffolder ───
+
+
+def test_flow_defaults():
+    r = scaffold_flow()
+    assert "@xyflow/react" in r["deps"]
+    assert "import { ReactFlow" in r["app"]
+    assert "initialNodes" in r["app"] and "initialEdges" in r["app"]
+    assert "useNodesState" in r["app"]
+    assert "<Background" in r["app"]
+    assert "<Controls" in r["app"]
+    assert "<MiniMap" in r["app"]
+
+
+def test_flow_interactive_off():
+    r = scaffold_flow(interactive=False)
+    assert "useNodesState" not in r["app"]
+    assert "defaultNodes" in r["app"]
+
+
+def test_flow_layout_dagre_tb():
+    r = scaffold_flow(layout="dagre-tb")
+    assert "@dagrejs/dagre" in r["deps"]
+    assert "ReactFlowProvider" in r["app"]
+    assert "useNodesInitialized" in r["app"]
+    assert "rankdir: 'TB'" in r["app"]
+
+
+def test_flow_layout_dagre_lr():
+    r = scaffold_flow(layout="dagre-lr")
+    assert "rankdir: 'LR'" in r["app"]
+
+
+def test_flow_no_chrome():
+    r = scaffold_flow(with_minimap=False, with_controls=False, with_background=False)
+    assert "<MiniMap" not in r["app"]
+    assert "<Controls" not in r["app"]
+    assert "<Background" not in r["app"]
+
+
+def test_flow_validation_dup_node_id():
+    with pytest.raises(ValueError, match="duplicate node id"):
+        scaffold_flow(nodes=[{"id": "a"}, {"id": "a"}], edges=[])
+
+
+def test_flow_validation_edge_unknown_target():
+    with pytest.raises(ValueError, match="references unknown node"):
+        scaffold_flow(
+            nodes=[{"id": "a"}],
+            edges=[{"source": "a", "target": "ghost"}],
+        )
+
+
+def test_flow_custom_node_type_warns():
+    r = scaffold_flow(
+        nodes=[{"id": "a", "type": "shape"}, {"id": "b"}],
+        edges=[{"source": "a", "target": "b"}],
+    )
+    assert any("nodeTypes registration" in w for w in r["warnings"])
+
+
+def test_flow_hide_attribution():
+    r = scaffold_flow(hide_attribution=True)
+    assert "proOptions" in r["app"]
+    assert "hideAttribution" in r["app"]
+
+
+def test_flow_color_mode_dark():
+    r = scaffold_flow(color_mode="dark")
+    assert 'colorMode="dark"' in r["app"]
+
+
+def test_flow_layout_validation():
+    with pytest.raises(ValueError, match="layout must be"):
+        scaffold_flow(layout="quantum-fluid")

@@ -6,8 +6,9 @@ from reactflow_mcp.server import _self_check
 def test_self_check_basic_shape():
     check = _self_check()
     assert check["server"] == "reactflow_mcp"
-    assert isinstance(check["tools"], list) and len(check["tools"]) == 8
+    assert isinstance(check["tools"], list) and len(check["tools"]) == 11
     assert check["resources"] == ["reactflow://deep-dive"]
+    assert check["recipes"] >= 10
 
 
 def test_self_check_data_counts_lower_bounds():
@@ -32,5 +33,8 @@ def test_all_expected_tools_registered():
         "reactflow_scaffold_custom_edge",
         "reactflow_validate_flow",
         "reactflow_svelte_equivalent",
+        "reactflow_list_recipes",
+        "reactflow_get_recipe",
+        "reactflow_scaffold_flow",
     }
     assert set(_self_check()["tools"]) == expected

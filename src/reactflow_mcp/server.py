@@ -9,6 +9,9 @@ Tools:
     - reactflow_scaffold_custom_edge  — generate TSX for a custom edge component
     - reactflow_validate_flow         — lint a flow JSON for v12 correctness
     - reactflow_svelte_equivalent     — map a React Flow symbol to Svelte Flow
+    - reactflow_list_recipes          — list OSS recipes that clone Pro patterns
+    - reactflow_get_recipe            — full copy-paste TSX for a specific recipe
+    - reactflow_scaffold_flow         — generate a full working TSX app from a node/edge spec
 
 Resource:
     - reactflow://deep-dive           — full deep-dive markdown brief
@@ -34,10 +37,11 @@ from reactflow_mcp.data.migration import (
     lookup as migration_lookup,
 )
 from reactflow_mcp.data.pro_examples import LICENSE_NOTES, PRICING_TIERS, PRO_EXAMPLES
+from reactflow_mcp.data.recipes import RECIPES, get_recipe, list_recipes
 from reactflow_mcp.data.svelte_equivalents import IDENTICAL as SVELTE_IDENTICAL
 from reactflow_mcp.data.svelte_equivalents import PORTING_NOTES, RENAMED as SVELTE_RENAMED
 from reactflow_mcp.data.svelte_equivalents import SVELTE_ONLY, lookup as svelte_lookup
-from reactflow_mcp.scaffolders import scaffold_custom_edge, scaffold_custom_node
+from reactflow_mcp.scaffolders import scaffold_custom_edge, scaffold_custom_node, scaffold_flow
 from reactflow_mcp.validators import validate_flow
 
 # ───────────────────────── constants ─────────────────────────
@@ -850,6 +854,266 @@ async def reactflow_svelte_equivalent(
     return _format_response(result, response_format, to_md)
 
 
+# ─────────── tool 9: list_recipes ───────────
+
+
+@mcp.tool(
+    name="reactflow_list_recipes",
+    annotations={
+        "title": "List OSS recipes that clone Pro patterns",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": False,
+    },
+)
+async def reactflow_list_recipes(
+    category: Annotated[Optional[str], Field(
+        default=None,
+        description="Filter by category: 'layout' | 'history' | 'interaction' | 'nodes' | 'grouping' | 'edges' | 'misc'.",
+    )] = None,
+    response_format: Annotated[ResponseFormat, Field(
+        default=ResponseFormat.MARKDOWN,
+        description="markdown | json",
+    )] = ResponseFormat.MARKDOWN,
+) -> str:
+    """List copy-paste OSS recipes that replicate React Flow Pro examples.
+
+    Each recipe covers a Pro-paid pattern (auto-layout, undo/redo,
+    copy/paste, helper lines, expand/collapse, force layout, editable edge,
+    shapes node, selection grouping, server-side image, node position
+    animation, remove attribution) using only the free `@xyflow/react` v12
+    library plus widely-available npm packages (dagre, elkjs, d3-force).
+
+    Use this BEFORE recommending a Pro subscription — most users can ship
+    these patterns themselves from the recipe code.
+
+    Returns JSON schema:
+        {
+          "filter": {"category": str?},
+          "count": int,
+          "recipes": [
+            {"name": str, "title": str, "category": str, "clones_pro": str?,
+             "summary": str, "deps": [str], "files": [str]}
+          ]
+        }
+    """
+    items = list_recipes(category=category)
+    payload = {
+        "filter": {"category": category},
+        "count": len(items),
+        "recipes": items,
+    }
+
+    def to_md(p: dict) -> str:
+        lines = ["# React Flow OSS recipes (Pro-pattern alternatives)"]
+        if p["filter"]["category"]:
+            lines.append(f"_filter: category=`{p['filter']['category']}`_")
+        lines.append(f"\n**{p['count']} recipe(s).**\n")
+        by_cat: dict[str, list] = {}
+        for r in p["recipes"]:
+            by_cat.setdefault(r["category"], []).append(r)
+        for cat, rs in by_cat.items():
+            lines.append(f"## {cat}")
+            for r in rs:
+                pro = f" _(clones Pro: **{r['clones_pro']}**)_" if r.get("clones_pro") else ""
+                deps = ", ".join(r["deps"]) if r["deps"] else "_none_"
+                lines.append(f"- **`{r['name']}`** — {r['title']}{pro}")
+                lines.append(f"  - {r['summary']}")
+                lines.append(f"  - deps: {deps} · files: {', '.join(f'`{f}`' for f in r['files'])}")
+            lines.append("")
+        lines.append("Fetch full code via `reactflow_get_recipe(name=...)`.")
+        return "\n".join(lines)
+
+    return _format_response(payload, response_format, to_md)
+
+
+# ─────────── tool 10: get_recipe ───────────
+
+
+@mcp.tool(
+    name="reactflow_get_recipe",
+    annotations={
+        "title": "Get a full OSS recipe",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": False,
+    },
+)
+async def reactflow_get_recipe(
+    name: Annotated[str, Field(
+        min_length=1, max_length=80,
+        description="Recipe slug (snake_case). Examples: 'auto_layout_dagre', 'undo_redo', 'copy_paste', 'helper_lines', 'expand_collapse', 'force_layout', 'editable_edge', 'shapes_node', 'selection_grouping', 'node_position_animation', 'server_side_image', 'remove_attribution'. List all via `reactflow_list_recipes`.",
+    )],
+    response_format: Annotated[ResponseFormat, Field(
+        default=ResponseFormat.MARKDOWN,
+        description="markdown | json",
+    )] = ResponseFormat.MARKDOWN,
+) -> str:
+    """Fetch the full copy-paste TSX recipe for an OSS Pro-pattern clone.
+
+    Returns the problem statement, high-level approach, list of @xyflow/react
+    APIs used, npm dependencies needed, one or more full source files
+    (TSX/TS), known gotchas, and reference URLs.
+
+    Returns JSON schema:
+        {
+          "name": str, "found": bool,
+          "title": str?, "category": str?, "clones_pro": str?,
+          "summary": str?, "problem": str?, "approach": str?,
+          "apis_used": [str]?, "deps": [str]?,
+          "files": {filename: source}?,
+          "gotchas": [str]?, "references": [str]?,
+          "suggestions": [str]?    // if not found
+        }
+    """
+    recipe = get_recipe(name)
+    if recipe is None:
+        all_names = sorted(RECIPES.keys())
+        q = name.lower()
+        suggestions = [n for n in all_names if q in n.lower() or n.lower() in q][:8]
+        payload = {"name": name, "found": False, "suggestions": suggestions or all_names}
+
+        def to_md_miss(p: dict) -> str:
+            lines = [f"# Recipe `{p['name']}` — not found"]
+            lines.append("\nAvailable recipes:")
+            lines.extend(f"- `{s}`" for s in p["suggestions"])
+            return "\n".join(lines)
+
+        return _format_response(payload, response_format, to_md_miss)
+
+    payload = {"found": True, **recipe}
+
+    def to_md(p: dict) -> str:
+        lines = [f"# `{p['name']}` — {p['title']}"]
+        if p.get("clones_pro"):
+            lines.append(f"\n_Clones React Flow Pro example: **{p['clones_pro']}**_")
+        lines.append(f"\n**Summary.** {p['summary']}")
+        lines.append(f"\n**Problem.** {p['problem']}")
+        lines.append(f"\n**Approach.** {p['approach']}")
+        if p.get("apis_used"):
+            lines.append(f"\n**APIs used:** " + ", ".join(f"`{a}`" for a in p["apis_used"]))
+        if p.get("deps"):
+            deps_str = ", ".join(f"`{d}`" for d in p["deps"]) if p["deps"] else "_(none)_"
+            lines.append(f"\n**npm deps (besides `@xyflow/react`):** {deps_str}")
+        if p.get("files"):
+            lines.append("\n## Code")
+            for fname, src in p["files"].items():
+                # infer language from extension
+                ext = fname.rsplit(".", 1)[-1] if "." in fname else "txt"
+                lang_map = {"tsx": "tsx", "ts": "ts", "css": "css", "snippet": "tsx"}
+                # handle .tsx.snippet style
+                if fname.endswith(".snippet"):
+                    inner_ext = fname[:-len(".snippet")].rsplit(".", 1)[-1]
+                    lang = lang_map.get(inner_ext, "txt")
+                else:
+                    lang = lang_map.get(ext, "txt")
+                lines.append(f"\n### `{fname}`\n\n```{lang}\n{src.rstrip()}\n```")
+        if p.get("gotchas"):
+            lines.append("\n## Gotchas")
+            lines.extend(f"- {g}" for g in p["gotchas"])
+        if p.get("references"):
+            lines.append("\n## References")
+            lines.extend(f"- {r}" for r in p["references"])
+        return "\n".join(lines)
+
+    return _format_response(payload, response_format, to_md)
+
+
+# ─────────── tool 11: scaffold_flow ───────────
+
+
+@mcp.tool(
+    name="reactflow_scaffold_flow",
+    annotations={
+        "title": "Scaffold a full React Flow TSX app",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": False,
+    },
+)
+async def reactflow_scaffold_flow(
+    nodes: Annotated[Optional[list[dict]], Field(
+        default=None,
+        description="List of nodes: [{id, type?: 'input'|'output'|'default'|'group'|custom, label?, position?:{x,y}, data?:{...}}]. Default = 3-node linear flow.",
+    )] = None,
+    edges: Annotated[Optional[list[dict]], Field(
+        default=None,
+        description="List of edges: [{id?, source, target, type?: 'default'|'smoothstep'|'step'|'straight'|'simplebezier'|custom, label?}]. Source/target must reference node ids.",
+    )] = None,
+    interactive: Annotated[bool, Field(
+        default=True,
+        description="If true, use useNodesState/useEdgesState + onConnect (editable). If false, use defaultNodes/defaultEdges (read-only).",
+    )] = True,
+    layout: Annotated[str, Field(
+        default="none",
+        description="Auto-layout strategy: 'none' (use provided positions) | 'dagre-tb' (top-down tree) | 'dagre-lr' (left-right tree). dagre layouts inject useAutoLayout hook + wrap in ReactFlowProvider.",
+    )] = "none",
+    with_minimap: Annotated[bool, Field(default=True, description="Include <MiniMap />.")] = True,
+    with_controls: Annotated[bool, Field(default=True, description="Include <Controls />.")] = True,
+    with_background: Annotated[bool, Field(default=True, description="Include <Background />.")] = True,
+    background_variant: Annotated[str, Field(
+        default="dots",
+        description="Background pattern: 'dots' | 'lines' | 'cross'.",
+    )] = "dots",
+    color_mode: Annotated[str, Field(
+        default="system",
+        description="Theme: 'light' | 'dark' | 'system'.",
+    )] = "system",
+    fit_view: Annotated[bool, Field(default=True, description="Auto-fit viewport on mount.")] = True,
+    hide_attribution: Annotated[bool, Field(
+        default=False,
+        description="Hide bottom-right attribution badge (proOptions.hideAttribution).",
+    )] = False,
+    response_format: Annotated[ResponseFormat, Field(
+        default=ResponseFormat.MARKDOWN,
+        description="markdown | json",
+    )] = ResponseFormat.MARKDOWN,
+) -> str:
+    """Generate a complete working TSX file for a React Flow app from a spec.
+
+    Produces a single `App.tsx` ready to drop into a Vite/Next.js project,
+    including imports, initial state, optional auto-layout hook (dagre),
+    Background / Controls / MiniMap children, and color-mode/fitView config.
+
+    Returns JSON schema:
+        {
+          "app": str,            // full TSX source
+          "deps": [str],         // npm packages to install
+          "warnings": [str]
+        }
+    """
+    try:
+        result = scaffold_flow(
+            nodes=nodes,
+            edges=edges,
+            interactive=interactive,
+            layout=layout,
+            with_minimap=with_minimap,
+            with_controls=with_controls,
+            with_background=with_background,
+            background_variant=background_variant,
+            color_mode=color_mode,
+            fit_view=fit_view,
+            hide_attribution=hide_attribution,
+        )
+    except ValueError as e:
+        return f"Error: {e}"
+
+    def to_md(p: dict) -> str:
+        lines = ["# Scaffolded React Flow app"]
+        for w in p["warnings"]:
+            lines.append(f"\n> ⚠️ {w}")
+        deps_str = " ".join(p["deps"])
+        lines.append(f"\n**Install:**\n\n```bash\nnpm install {deps_str}\n```")
+        lines.append(f"\n## `App.tsx`\n\n```tsx\n{p['app'].rstrip()}\n```")
+        return "\n".join(lines)
+
+    return _format_response(result, response_format, to_md)
+
+
 # ─────────── resource: deep-dive doc ───────────
 
 
@@ -884,6 +1148,10 @@ def _self_check() -> dict:
             "reactflow_scaffold_custom_edge",
             "reactflow_validate_flow",
             "reactflow_svelte_equivalent",
+            "reactflow_list_recipes",
+            "reactflow_get_recipe",
+            "reactflow_scaffold_flow",
         ],
+        "recipes": len(RECIPES),
         "resources": [DEEP_DIVE_URI],
     }

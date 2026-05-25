@@ -12,6 +12,10 @@ VALID_POSITIONS = {"top", "right", "bottom", "left"}
 VALID_HANDLE_KINDS = {"source", "target"}
 VALID_STYLES = {"tailwind", "css-modules", "inline"}
 VALID_PATH_TYPES = {"bezier", "smoothstep", "step", "straight", "simplebezier"}
+VALID_EDGE_TYPES = {"default", "smoothstep", "step", "straight", "simplebezier"}
+VALID_NODE_TYPES = {"default", "input", "output", "group"}
+VALID_LAYOUTS = {"none", "dagre-tb", "dagre-lr"}
+VALID_THEMES = {"light", "dark", "system"}
 PASCAL_RE = re.compile(r"^[A-Z][A-Za-z0-9]*$")
 
 
@@ -265,6 +269,241 @@ const nodeTypes = {{
         "usage": usage,
         "warnings": warnings,
     }
+
+
+# ───────────────────────── full flow scaffolder ─────────────────────────
+
+
+def scaffold_flow(
+    *,
+    nodes: list[dict] | None = None,
+    edges: list[dict] | None = None,
+    interactive: bool = True,
+    layout: str = "none",
+    with_minimap: bool = True,
+    with_controls: bool = True,
+    with_background: bool = True,
+    background_variant: str = "dots",
+    color_mode: str = "system",
+    fit_view: bool = True,
+    hide_attribution: bool = False,
+) -> dict:
+    """Generate a complete TSX file for a working React Flow app from a spec.
+
+    Returns dict {"app": tsx, "deps": [str], "warnings": [str]}.
+    """
+    warnings: list[str] = []
+    deps: list[str] = ["@xyflow/react"]
+
+    nodes = nodes or [
+        {"id": "n1", "type": "input", "label": "Start", "position": {"x": 0, "y": 0}},
+        {"id": "n2", "label": "Middle", "position": {"x": 0, "y": 120}},
+        {"id": "n3", "type": "output", "label": "End", "position": {"x": 0, "y": 240}},
+    ]
+    edges = edges or [
+        {"source": "n1", "target": "n2"},
+        {"source": "n2", "target": "n3"},
+    ]
+
+    if layout not in VALID_LAYOUTS:
+        raise ValueError(f"layout must be one of {sorted(VALID_LAYOUTS)}")
+    if color_mode not in VALID_THEMES:
+        raise ValueError(f"color_mode must be one of {sorted(VALID_THEMES)}")
+    if background_variant not in {"dots", "lines", "cross"}:
+        raise ValueError("background_variant must be dots | lines | cross")
+
+    # validate + normalize nodes
+    seen_ids: set[str] = set()
+    n_lines = []
+    for i, n in enumerate(nodes):
+        nid = n.get("id") or f"n{i+1}"
+        if nid in seen_ids:
+            raise ValueError(f"duplicate node id '{nid}'")
+        seen_ids.add(nid)
+        ntype = n.get("type")
+        if ntype is not None and ntype not in VALID_NODE_TYPES:
+            warnings.append(f"node '{nid}' type='{ntype}' isn't a built-in — needs nodeTypes registration.")
+        pos = n.get("position") or {"x": 0, "y": i * 100}
+        label = n.get("label") or n.get("data", {}).get("label") or nid
+        data = n.get("data") or {"label": label}
+        type_field = f", type: '{ntype}'" if ntype else ""
+        n_lines.append(
+            f"  {{ id: '{nid}'{type_field}, position: {{ x: {pos['x']}, y: {pos['y']} }}, data: {json_to_ts(data)} }},"
+        )
+    nodes_literal = "[\n" + "\n".join(n_lines) + "\n]"
+
+    # validate + normalize edges
+    seen_eids: set[str] = set()
+    e_lines = []
+    for i, e in enumerate(edges):
+        src, tgt = e.get("source"), e.get("target")
+        if not src or not tgt:
+            raise ValueError(f"edge[{i}] missing source/target")
+        if src not in seen_ids:
+            raise ValueError(f"edge[{i}] source '{src}' references unknown node")
+        if tgt not in seen_ids:
+            raise ValueError(f"edge[{i}] target '{tgt}' references unknown node")
+        eid = e.get("id") or f"e-{src}-{tgt}"
+        if eid in seen_eids:
+            raise ValueError(f"duplicate edge id '{eid}'")
+        seen_eids.add(eid)
+        etype = e.get("type")
+        if etype is not None and etype not in VALID_EDGE_TYPES:
+            warnings.append(f"edge '{eid}' type='{etype}' isn't a built-in — needs edgeTypes registration.")
+        type_field = f", type: '{etype}'" if etype else ""
+        label_field = f", label: '{e['label']}'" if e.get("label") else ""
+        e_lines.append(f"  {{ id: '{eid}', source: '{src}', target: '{tgt}'{type_field}{label_field} }},")
+    edges_literal = "[\n" + "\n".join(e_lines) + "\n]"
+
+    # imports
+    rf_imports = ["ReactFlow"]
+    if with_background:
+        rf_imports.append("Background")
+    if with_controls:
+        rf_imports.append("Controls")
+    if with_minimap:
+        rf_imports.append("MiniMap")
+    if interactive:
+        rf_imports.extend(["useNodesState", "useEdgesState", "addEdge"])
+    rf_imports.extend(["type Node", "type Edge"])
+    if interactive:
+        rf_imports.append("type Connection")
+    if layout.startswith("dagre"):
+        rf_imports.extend(["useReactFlow", "useNodesInitialized", "Position", "ReactFlowProvider"])
+        deps.append("@dagrejs/dagre")
+
+    rf_import_line = ", ".join(rf_imports)
+
+    # dagre helper code
+    dagre_block = ""
+    layout_call = ""
+    wrap_provider = False
+    if layout.startswith("dagre"):
+        direction = "LR" if layout.endswith("-lr") else "TB"
+        wrap_provider = True
+        dagre_block = f"""\
+function useAutoLayout() {{
+  const {{ getNodes, getEdges, setNodes, fitView }} = useReactFlow();
+  const initialized = useNodesInitialized();
+  useEffect(() => {{
+    if (!initialized) return;
+    const g = new dagre.graphlib.Graph().setDefaultEdgeLabel(() => ({{}}));
+    g.setGraph({{ rankdir: '{direction}', nodesep: 40, ranksep: 80 }});
+    const ns = getNodes();
+    const es = getEdges();
+    ns.forEach((n) => g.setNode(n.id, {{ width: n.measured?.width ?? 180, height: n.measured?.height ?? 40 }}));
+    es.forEach((e) => g.setEdge(e.source, e.target));
+    dagre.layout(g);
+    setNodes(ns.map((n) => {{
+      const r = g.node(n.id);
+      const w = n.measured?.width ?? 180;
+      const h = n.measured?.height ?? 40;
+      return {{
+        ...n,
+        sourcePosition: '{direction}' === 'LR' ? Position.Right : Position.Bottom,
+        targetPosition: '{direction}' === 'LR' ? Position.Left : Position.Top,
+        position: {{ x: r.x - w / 2, y: r.y - h / 2 }},
+      }};
+    }}));
+    requestAnimationFrame(() => fitView({{ padding: 0.2 }}));
+  }}, [initialized, getNodes, getEdges, setNodes, fitView]);
+}}
+
+"""
+        layout_call = "  useAutoLayout();\n"
+
+    # body
+    if interactive:
+        body = f"""\
+  const [nodes, setNodes, onNodesChange] = useNodesState<Node>(initialNodes);
+  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>(initialEdges);
+  const onConnect = useCallback(
+    (params: Connection) => setEdges((es) => addEdge(params, es)),
+    [setEdges],
+  );
+{layout_call}"""
+        rf_props = "nodes={nodes} edges={edges} onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} onConnect={onConnect}"
+    else:
+        body = f"""\
+{layout_call}"""
+        rf_props = "defaultNodes={initialNodes} defaultEdges={initialEdges}"
+
+    color_mode_prop = f' colorMode="{color_mode}"' if color_mode != "light" else ""
+    fit_view_prop = " fitView" if fit_view else ""
+    pro_prop = ' proOptions={{ hideAttribution: true }}' if hide_attribution else ""
+
+    children = []
+    if with_background:
+        children.append(f'        <Background variant="{background_variant}" />')
+    if with_controls:
+        children.append("        <Controls />")
+    if with_minimap:
+        children.append("        <MiniMap />")
+    children_block = "\n".join(children)
+
+    inner_jsx = f"""    <ReactFlow {rf_props}{fit_view_prop}{color_mode_prop}{pro_prop}>
+{children_block}
+    </ReactFlow>"""
+
+    if wrap_provider:
+        return_jsx = f"""  return (
+    <ReactFlowProvider>
+{inner_jsx}
+    </ReactFlowProvider>
+  );"""
+    else:
+        return_jsx = f"""  return (
+{inner_jsx}
+  );"""
+
+    use_callback_import = ", useCallback" if interactive else ""
+    use_effect_import = ", useEffect" if layout.startswith("dagre") else ""
+    dagre_import = "import dagre from '@dagrejs/dagre';\n" if layout.startswith("dagre") else ""
+
+    app = f"""\
+import React{use_callback_import}{use_effect_import} from 'react';
+import {{ {rf_import_line} }} from '@xyflow/react';
+{dagre_import}import '@xyflow/react/dist/style.css';
+
+const initialNodes: Node[] = {nodes_literal};
+
+const initialEdges: Edge[] = {edges_literal};
+
+{dagre_block}export default function App() {{
+{body}
+{return_jsx}
+}}
+"""
+
+    return {
+        "app": app,
+        "deps": deps,
+        "warnings": warnings,
+    }
+
+
+def json_to_ts(value: object) -> str:
+    """Render a Python value as a TS literal (object → {key: value, …})."""
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if value is None:
+        return "null"
+    if isinstance(value, (int, float)):
+        return str(value)
+    if isinstance(value, str):
+        escaped = value.replace("'", "\\'")
+        return f"'{escaped}'"
+    if isinstance(value, list):
+        return "[" + ", ".join(json_to_ts(v) for v in value) + "]"
+    if isinstance(value, dict):
+        parts = []
+        for k, v in value.items():
+            if isinstance(k, str) and k.isidentifier():
+                parts.append(f"{k}: {json_to_ts(v)}")
+            else:
+                parts.append(f"'{k}': {json_to_ts(v)}")
+        return "{ " + ", ".join(parts) + " }"
+    return f"'{value!r}'"
 
 
 # ───────────────────────── edge scaffolder ─────────────────────────

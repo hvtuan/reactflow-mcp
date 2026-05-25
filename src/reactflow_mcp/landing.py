@@ -16,6 +16,7 @@ from starlette.responses import HTMLResponse
 from reactflow_mcp import __version__
 from reactflow_mcp.data.api_catalog import API_CATALOG
 from reactflow_mcp.data.pro_examples import PRO_EXAMPLES
+from reactflow_mcp.data.recipes import RECIPES
 from reactflow_mcp.data.svelte_equivalents import (
     IDENTICAL as SVELTE_IDENTICAL,
     RENAMED as SVELTE_RENAMED,
@@ -86,14 +87,18 @@ def _build_markdown(endpoint_url: str) -> str:
         ("reactflow_get_api", "Structured lookup of a single API symbol (kind, signature, props, deprecation)."),
         ("reactflow_lookup_v11_v12", "Translate v10/v11 React Flow symbol → v12 equivalent."),
         ("reactflow_list_pro_examples", "List React Flow Pro paid examples + pricing + license notes."),
-        ("reactflow_scaffold_custom_node", "Generate ready-to-paste TSX for a custom React Flow node component."),
-        ("reactflow_scaffold_custom_edge", "Generate ready-to-paste TSX for a custom React Flow edge component."),
-        ("reactflow_validate_flow", "Lint a flow JSON for v12 correctness (errors + warnings + stats)."),
         ("reactflow_svelte_equivalent", "Map a React Flow symbol → Svelte Flow equivalent + porting notes."),
+        ("reactflow_scaffold_custom_node", "Generate TSX for a custom React Flow node component."),
+        ("reactflow_scaffold_custom_edge", "Generate TSX for a custom React Flow edge component."),
+        ("reactflow_scaffold_flow", "Generate a complete working TSX app from a nodes/edges spec (+ optional dagre auto-layout)."),
+        ("reactflow_list_recipes", "List OSS recipes that clone React Flow Pro examples (auto-layout, undo/redo, helper lines, …)."),
+        ("reactflow_get_recipe", "Full copy-paste TSX for a Pro-pattern recipe (12 currently — most paid Pro examples covered)."),
+        ("reactflow_validate_flow", "Lint a flow JSON for v12 correctness (errors + warnings + stats)."),
     ]
     tool_rows = "\n".join(f"| `{name}` | {desc} |" for name, desc in tools)
 
     svelte_total = len(SVELTE_IDENTICAL) + len(SVELTE_RENAMED) + len(SVELTE_ONLY)
+    recipe_count = len(RECIPES)
 
     return f"""# reactflow-mcp · v{__version__}
 
@@ -156,6 +161,7 @@ Then point your client to the local binary:
 - **{len(API_CATALOG)}** React Flow API symbols (catalog)
 - **{len(PRO_EXAMPLES)}** Pro examples (catalog + pricing + license)
 - **{svelte_total}** Svelte Flow symbol mappings ({len(SVELTE_RENAMED)} renamed · {len(SVELTE_IDENTICAL)} identical · {len(SVELTE_ONLY)} svelte-only)
+- **{recipe_count}** OSS recipes cloning Pro patterns (auto-layout dagre/elkjs/force, undo-redo, copy-paste, helper lines, expand-collapse, editable edge, shapes, server-side image, ...)
 - v11 → v12 migration map (covers `parentNode → parentId`, `project → screenToFlowPosition`, `node.width → node.measured.width`, etc.)
 
 ---

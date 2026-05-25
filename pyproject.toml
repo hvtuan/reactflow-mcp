@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "reactflow-mcp"
-version = "0.3.0"
+version = "0.4.0"
 description = "MCP server giving LLMs first-class knowledge of React Flow (@xyflow/react) APIs, hooks, components, v11→v12 migration, and OSS/Pro feature surface."
 readme = "README.md"
 license = { file = "LICENSE" }
