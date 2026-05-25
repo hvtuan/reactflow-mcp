@@ -1,0 +1,85 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install package + dev deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Run pytest
+        run: pytest -v
+
+      - name: Smoke test — _self_check
+        run: |
+          python -c "from reactflow_mcp.server import _self_check; import json; print(json.dumps(_self_check(), indent=2))"
+
+      - name: Smoke test — stdio MCP handshake
+        run: |
+          python - <<'EOF'
+          import asyncio, json, sys
+
+          async def main():
+              proc = await asyncio.create_subprocess_exec(
+                  sys.executable, "-m", "reactflow_mcp",
+                  stdin=asyncio.subprocess.PIPE,
+                  stdout=asyncio.subprocess.PIPE,
+                  stderr=asyncio.subprocess.PIPE,
+              )
+
+              async def send(req):
+                  proc.stdin.write((json.dumps(req) + "\n").encode())
+                  await proc.stdin.drain()
+
+              async def read_one():
+                  line = await asyncio.wait_for(proc.stdout.readline(), timeout=10)
+                  return json.loads(line.decode())
+
+              await send({"jsonrpc": "2.0", "id": 1, "method": "initialize",
+                          "params": {"protocolVersion": "2024-11-05", "capabilities": {}, "clientInfo": {"name": "ci", "version": "0"}}})
+              init = await read_one()
+              assert init["result"]["serverInfo"]["name"] == "reactflow_mcp"
+
+              await send({"jsonrpc": "2.0", "method": "notifications/initialized"})
+              await send({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
+              tl = await read_one()
+              tools = [t["name"] for t in tl["result"]["tools"]]
+              assert len(tools) == 8, f"expected 8 tools, got {len(tools)}: {tools}"
+
+              await send({"jsonrpc": "2.0", "id": 3, "method": "tools/call",
+                          "params": {"name": "reactflow_lookup_v11_v12",
+                                     "arguments": {"symbol": "parentNode", "response_format": "json"}}})
+              call = await read_one()
+              text = call["result"]["content"][0]["text"]
+              assert "parentId" in text, f"expected parentId in response, got: {text[:200]}"
+
+              proc.stdin.close()
+              try:
+                  await asyncio.wait_for(proc.wait(), timeout=3)
+              except asyncio.TimeoutError:
+                  proc.kill()
+              print("stdio handshake OK")
+
+          asyncio.run(main())
+          EOF
