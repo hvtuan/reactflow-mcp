@@ -8,6 +8,7 @@ Tools:
     - reactflow_scaffold_custom_node  — generate TSX for a custom node component
     - reactflow_scaffold_custom_edge  — generate TSX for a custom edge component
     - reactflow_validate_flow         — lint a flow JSON for v12 correctness
+    - reactflow_svelte_equivalent     — map a React Flow symbol to Svelte Flow
 
 Resource:
     - reactflow://deep-dive           — full deep-dive markdown brief
@@ -32,6 +33,9 @@ from reactflow_mcp.data.migration import (
     lookup as migration_lookup,
 )
 from reactflow_mcp.data.pro_examples import LICENSE_NOTES, PRICING_TIERS, PRO_EXAMPLES
+from reactflow_mcp.data.svelte_equivalents import IDENTICAL as SVELTE_IDENTICAL
+from reactflow_mcp.data.svelte_equivalents import PORTING_NOTES, RENAMED as SVELTE_RENAMED
+from reactflow_mcp.data.svelte_equivalents import SVELTE_ONLY, lookup as svelte_lookup
 from reactflow_mcp.scaffolders import scaffold_custom_edge, scaffold_custom_node
 from reactflow_mcp.validators import validate_flow
 
@@ -751,6 +755,88 @@ async def reactflow_validate_flow(
     return _format_response(report, response_format, to_md)
 
 
+# ─────────── tool 8: svelte_equivalent ───────────
+
+
+@mcp.tool(
+    name="reactflow_svelte_equivalent",
+    annotations={
+        "title": "React Flow → Svelte Flow symbol",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": False,
+    },
+)
+async def reactflow_svelte_equivalent(
+    symbol: Annotated[str, Field(
+        min_length=1, max_length=80,
+        description="React Flow symbol you want the Svelte Flow equivalent for. Examples: 'ReactFlow', 'useReactFlow', 'EdgeLabelRenderer', 'Background', 'addEdge', 'Handle'. Case-insensitive.",
+    )],
+    include_porting_notes: Annotated[bool, Field(
+        default=True,
+        description="Append the cross-cutting porting notes (state model, hooks shape, Svelte 5 requirement, Pro example subset).",
+    )] = True,
+    response_format: Annotated[ResponseFormat, Field(
+        default=ResponseFormat.MARKDOWN,
+        description="markdown | json",
+    )] = ResponseFormat.MARKDOWN,
+) -> str:
+    """Map a React Flow symbol to its Svelte Flow (`@xyflow/svelte`) equivalent.
+
+    Most symbols are identically named — only the import path changes.
+    A handful are renamed: <ReactFlow>→<SvelteFlow>, <ReactFlowProvider>→
+    <SvelteFlowProvider>, useReactFlow→useSvelteFlow, EdgeLabelRenderer→EdgeLabel.
+    `EdgeReconnectAnchor` is Svelte-only.
+
+    Returns JSON schema:
+        {
+          "react_symbol": str,
+          "svelte_symbol": str | null,
+          "found": bool,
+          "status": "renamed" | "identical" | "svelte_only" | "unknown",
+          "kind": str?, "note": str?,
+          "react_import": "@xyflow/react",
+          "svelte_import": "@xyflow/svelte",
+          "suggestions": [str]?,
+          "porting_notes": {state_model, custom_components, imports, svelte_version, hooks_return_shape, pro_examples_subset, release_train}?
+        }
+    """
+    result = svelte_lookup(symbol)
+    if include_porting_notes:
+        result["porting_notes"] = PORTING_NOTES
+
+    def to_md(p: dict) -> str:
+        lines = [f"# `{p['react_symbol'] or symbol}` — React Flow → Svelte Flow"]
+        status = p.get("status", "unknown")
+        if status == "renamed":
+            lines.append(f"\n🔄 **Renamed:** `{p['react_symbol']}` → **`{p['svelte_symbol']}`**  ({p.get('kind', '')})")
+            lines.append(f"\nImport from `{p['svelte_import']}` (was `{p['react_import']}`).")
+            if p.get("note"):
+                lines.append(f"\n> {p['note']}")
+        elif status == "identical":
+            lines.append(f"\n✅ **Same name:** `{p['svelte_symbol']}` — just change the import path.")
+            lines.append(f"\n```ts\n// React: import {{ {p['react_symbol']} }} from \"{p['react_import']}\";\n// Svelte: import {{ {p['svelte_symbol']} }} from \"{p['svelte_import']}\";\n```")
+        elif status == "svelte_only":
+            lines.append(f"\n🟣 **Svelte-only symbol** — no direct React Flow equivalent.")
+            if p.get("note"):
+                lines.append(f"\n> {p['note']}")
+        else:  # unknown
+            lines.append("\n❌ Not in mapping.")
+            if p.get("suggestions"):
+                lines.append("\nDid you mean:")
+                lines.extend(f"- `{s}`" for s in p["suggestions"])
+
+        if "porting_notes" in p:
+            lines.append("\n## General porting notes")
+            for k, v in p["porting_notes"].items():
+                lines.append(f"- **{k}** — {v}")
+
+        return "\n".join(lines)
+
+    return _format_response(result, response_format, to_md)
+
+
 # ─────────── resource: deep-dive doc ───────────
 
 
@@ -773,6 +859,9 @@ def _self_check() -> dict:
         "api_catalog_entries": len(API_CATALOG),
         "migration_entries": len(SYMBOL_MIGRATION) + len(PACKAGE_MIGRATION),
         "pro_examples": len(PRO_EXAMPLES),
+        "svelte_renamed": len(SVELTE_RENAMED),
+        "svelte_identical": len(SVELTE_IDENTICAL),
+        "svelte_only": len(SVELTE_ONLY),
         "tools": [
             "reactflow_search_docs",
             "reactflow_get_api",
@@ -781,6 +870,7 @@ def _self_check() -> dict:
             "reactflow_scaffold_custom_node",
             "reactflow_scaffold_custom_edge",
             "reactflow_validate_flow",
+            "reactflow_svelte_equivalent",
         ],
         "resources": [DEEP_DIVE_URI],
     }
