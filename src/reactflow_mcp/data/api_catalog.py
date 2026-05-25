@@ -372,6 +372,225 @@ API_CATALOG: dict[str, dict] = {
     "PanOnScrollMode": {"kind": "enum", "category": "viewport", "summary": "Scroll-pan axis lock.", "signature": "'free' | 'horizontal' | 'vertical'"},
     "SelectionMode": {"kind": "enum", "category": "selection", "summary": "Partial = select when overlap; Full = require full enclosure.", "signature": "'full' | 'partial'"},
     "ColorMode": {"kind": "enum", "category": "theme", "summary": "Theme.", "signature": "'light' | 'dark' | 'system'"},
+    "Align": {"kind": "enum", "category": "geometry", "summary": "Anchor alignment for toolbars / labels.", "signature": "'start' | 'center' | 'end'"},
+    "ZIndexMode": {"kind": "enum", "category": "viewport", "summary": "Strategy RF uses to assign zIndex to elements.", "signature": "'auto' | 'manual'"},
+
+    # ───────────────────────── handler / callback types ─────────────────────────
+    "OnConnect": {
+        "kind": "type", "category": "callback",
+        "summary": "Signature for the `onConnect` prop. Fires when a user completes a connection drag.",
+        "signature": "(connection: Connection) => void",
+    },
+    "OnConnectStart": {
+        "kind": "type", "category": "callback",
+        "summary": "Fired when a connection drag begins.",
+        "signature": "(event, params: { nodeId: string | null; handleId: string | null; handleType: 'source' | 'target' | null }) => void",
+    },
+    "OnConnectEnd": {
+        "kind": "type", "category": "callback",
+        "summary": "Fired when a connection drag ends — connected OR cancelled. Use to detect connection-to-empty for 'new node from connection' UX.",
+        "signature": "(event, connectionState: ConnectionState) => void",
+    },
+    "OnNodesChange": {
+        "kind": "type", "category": "callback",
+        "summary": "Signature for the `onNodesChange` prop. Receives an array of NodeChange events to be applied via applyNodeChanges.",
+        "signature": "(changes: NodeChange[]) => void",
+    },
+    "OnEdgesChange": {
+        "kind": "type", "category": "callback",
+        "summary": "Signature for the `onEdgesChange` prop.",
+        "signature": "(changes: EdgeChange[]) => void",
+    },
+    "OnNodesDelete": {
+        "kind": "type", "category": "callback",
+        "summary": "Fires after one or more nodes are removed (post-delete-key, post-deleteElements).",
+        "signature": "(nodes: Node[]) => void",
+    },
+    "OnEdgesDelete": {
+        "kind": "type", "category": "callback",
+        "summary": "Fires after one or more edges are removed.",
+        "signature": "(edges: Edge[]) => void",
+    },
+    "OnDelete": {
+        "kind": "type", "category": "callback",
+        "summary": "Combined post-delete handler — fires once with all deleted nodes + edges.",
+        "signature": "(params: { nodes: Node[]; edges: Edge[] }) => void",
+    },
+    "OnBeforeDelete": {
+        "kind": "type", "category": "callback",
+        "summary": "Pre-delete gate. Return false / Promise<false> to abort the deletion (e.g., show a confirm dialog).",
+        "signature": "(params: { nodes: Node[]; edges: Edge[] }) => boolean | Promise<boolean>",
+    },
+    "OnInit": {
+        "kind": "type", "category": "callback",
+        "summary": "Fires once with the imperative ReactFlowInstance when the flow is ready.",
+        "signature": "(instance: ReactFlowInstance) => void",
+    },
+    "OnMove": {
+        "kind": "type", "category": "callback",
+        "summary": "Fires during pan/zoom with the new viewport.",
+        "signature": "(event: MouseEvent | TouchEvent | null, viewport: Viewport) => void",
+    },
+    "OnNodeDrag": {
+        "kind": "type", "category": "callback",
+        "summary": "Per-node drag callback — onNodeDragStart / onNodeDrag / onNodeDragStop share this signature.",
+        "signature": "(event, node: Node, nodes: Node[]) => void",
+    },
+    "OnReconnect": {
+        "kind": "type", "category": "callback",
+        "summary": "Edge endpoint reconnection. (Replaces v11 `onEdgeUpdate`.)",
+        "signature": "(oldEdge: Edge, newConnection: Connection) => void",
+    },
+    "OnError": {
+        "kind": "type", "category": "callback",
+        "summary": "Custom error reporter. RF emits warnings via console.warn by default; override to integrate with Sentry etc.",
+        "signature": "(code: string, message: string) => void",
+    },
+    "OnSelectionChangeFunc": {
+        "kind": "type", "category": "callback",
+        "summary": "Selection-change handler. Receives all selected nodes + edges (not the delta).",
+        "signature": "(params: { nodes: Node[]; edges: Edge[] }) => void",
+    },
+    "SelectionDragHandler": {
+        "kind": "type", "category": "callback",
+        "summary": "onSelectionDragStart / onSelectionDrag / onSelectionDragStop signature.",
+        "signature": "(event, nodes: Node[]) => void",
+    },
+    "NodeMouseHandler": {
+        "kind": "type", "category": "callback",
+        "summary": "onNodeClick / onNodeDoubleClick / onNodeMouseEnter / onNodeMouseMove / onNodeMouseLeave / onNodeContextMenu signature.",
+        "signature": "(event, node: Node) => void",
+    },
+    "EdgeMouseHandler": {
+        "kind": "type", "category": "callback",
+        "summary": "onEdgeClick / onEdgeDoubleClick / onEdgeMouse* / onEdgeContextMenu signature.",
+        "signature": "(event, edge: Edge) => void",
+    },
+
+    # ───────────────────────── support types ─────────────────────────
+    "ConnectionState": {
+        "kind": "type", "category": "data",
+        "summary": "State of an in-progress connection drag (returned by useConnection).",
+        "signature": "{ inProgress: boolean; isValid: boolean | null; fromNode: Node | null; fromHandle: NodeHandle | null; fromPosition: Position | null; toNode: Node | null; toHandle: NodeHandle | null; toPosition: Position | null; from: XYPosition | null; to: XYPosition | null }",
+    },
+    "ConnectionLineComponent": {
+        "kind": "type", "category": "data",
+        "summary": "Custom connection-line component type.",
+        "signature": "React.ComponentType<ConnectionLineComponentProps>",
+    },
+    "ConnectionLineComponentProps": {
+        "kind": "type", "category": "data",
+        "summary": "Props injected into a custom connection-line component during drag.",
+        "signature": "{ fromX: number; fromY: number; toX: number; toY: number; fromPosition: Position; toPosition: Position; connectionLineType: ConnectionLineType; connectionLineStyle?: CSSProperties; fromNode?: Node; fromHandle?: NodeHandle }",
+    },
+    "NodeTypes": {
+        "kind": "type", "category": "data",
+        "summary": "Map of custom node type name → component. Declare OUTSIDE component or wrap in useMemo.",
+        "signature": "Record<string, React.ComponentType<NodeProps>>",
+    },
+    "EdgeTypes": {
+        "kind": "type", "category": "data",
+        "summary": "Map of custom edge type name → component. Same memo rule as NodeTypes.",
+        "signature": "Record<string, React.ComponentType<EdgeProps>>",
+    },
+    "DefaultEdgeOptions": {
+        "kind": "type", "category": "data",
+        "summary": "Defaults applied to every newly-created edge (from onConnect or addEdges).",
+        "signature": "{ type?: string; animated?: boolean; hidden?: boolean; deletable?: boolean; selectable?: boolean; markerStart?: EdgeMarker; markerEnd?: EdgeMarker; style?: CSSProperties; data?: any; zIndex?: number; pathOptions?: any }",
+    },
+    "EdgeMarker": {
+        "kind": "type", "category": "data",
+        "summary": "Edge end marker (arrowhead) config.",
+        "signature": "{ type: 'arrow' | 'arrowclosed'; color?: string; width?: number; height?: number; orient?: string; strokeWidth?: number }",
+    },
+    "NodeHandle": {
+        "kind": "type", "category": "data",
+        "summary": "Single handle entry on a node's handles[] array. Required for SSR edge rendering.",
+        "signature": "{ id: string | null; type: 'source' | 'target'; position: Position; x?: number; y?: number; width?: number; height?: number }",
+    },
+    "NodeConnection": {
+        "kind": "type", "category": "data",
+        "summary": "Connection entry returned by useNodeConnections / instance.getNodeConnections.",
+        "signature": "{ source: string; target: string; sourceHandle: string | null; targetHandle: string | null; edgeId: string }",
+    },
+    "HandleConnection": {
+        "kind": "type", "category": "data",
+        "summary": "Alias for NodeConnection — same shape, returned by useHandleConnections (deprecated).",
+        "signature": "NodeConnection",
+        "deprecated": True, "replacement": "NodeConnection",
+    },
+    "InternalNode": {
+        "kind": "type", "category": "data",
+        "summary": "Internal node representation with computed absolute position + measured dims. Returned by useInternalNode / instance.getInternalNode.",
+        "signature": "Node<DataShape> & { internals: { positionAbsolute: XYPosition; handleBounds?: { source?: NodeHandle[]; target?: NodeHandle[] }; userNode: Node } }",
+    },
+    "ReactFlowInstance": {
+        "kind": "type", "category": "data",
+        "summary": "Imperative API returned by useReactFlow(). Full method list in `useReactFlow` notes.",
+        "signature": "{ getNodes, setNodes, addNodes, getNode, updateNode, updateNodeData, getEdges, setEdges, addEdges, getEdge, updateEdge, updateEdgeData, getZoom, zoomIn, zoomOut, zoomTo, getViewport, setViewport, setCenter, fitView, fitBounds, screenToFlowPosition, flowToScreenPosition, getIntersectingNodes, isNodeIntersecting, getNodeConnections, getHandleConnections, getNodesBounds, deleteElements, toObject, viewportInitialized }",
+    },
+    "ReactFlowJsonObject": {
+        "kind": "type", "category": "data",
+        "summary": "Serialized flow shape returned by instance.toObject() — nodes + edges + viewport.",
+        "signature": "{ nodes: Node[]; edges: Edge[]; viewport: Viewport }",
+    },
+    "IsValidConnection": {
+        "kind": "type", "category": "callback",
+        "summary": "Per-flow or per-handle validator — return false to block the connection mid-drag.",
+        "signature": "(connection: Connection | Edge) => boolean",
+    },
+    "DeleteElements": {
+        "kind": "type", "category": "callback",
+        "summary": "Type of instance.deleteElements method.",
+        "signature": "(params: { nodes?: { id: string }[] | Node[]; edges?: { id: string }[] | Edge[] }) => Promise<{ deletedNodes: Node[]; deletedEdges: Edge[] }>",
+    },
+    "MiniMapNodeProps": {
+        "kind": "type", "category": "data",
+        "summary": "Props injected into a custom MiniMap node renderer (passed as nodeComponent prop).",
+        "signature": "{ id: string; x: number; y: number; width: number; height: number; borderRadius: number; color: string; strokeColor: string; strokeWidth: number; className?: string; selected: boolean; shapeRendering: 'auto' | 'crispEdges' | 'geometricPrecision' | 'optimizeSpeed' }",
+    },
+    "ResizeParams": {
+        "kind": "type", "category": "data",
+        "summary": "Argument passed to NodeResizer onResize / onResizeStart / onResizeEnd callbacks.",
+        "signature": "{ x: number; y: number; width: number; height: number }",
+    },
+    "AriaLabelConfig": {
+        "kind": "type", "category": "data",
+        "summary": "Override built-in ARIA labels (i18n / customization). Each key is a function returning the label string.",
+        "signature": "{ 'node.a11yDescription.default': () => string; 'node.a11yDescription.keyboardDisabled': () => string; 'edge.a11yDescription.default': () => string; 'controls.zoomIn': () => string; … many more }",
+    },
+
+    # ───────────────────────── geometry / config types ─────────────────────────
+    "XyPosition": {
+        "kind": "type", "category": "geometry",
+        "summary": "2D coordinate pair used throughout RF.",
+        "signature": "{ x: number; y: number }",
+    },
+    "Rect": {
+        "kind": "type", "category": "geometry",
+        "summary": "Bounding rectangle.",
+        "signature": "{ x: number; y: number; width: number; height: number }",
+    },
+    "CoordinateExtent": {
+        "kind": "type", "category": "geometry",
+        "summary": "Min/max bounds for pan or node placement. `[[minX, minY], [maxX, maxY]]`.",
+        "signature": "[[number, number], [number, number]]",
+    },
+    "NodeOrigin": {
+        "kind": "type", "category": "geometry",
+        "summary": "Origin point used for node positioning. [0,0]=top-left (default); [0.5,0.5]=center.",
+        "signature": "[number, number]",
+    },
+    "SnapGrid": {
+        "kind": "type", "category": "geometry",
+        "summary": "Snap-to-grid spacing.",
+        "signature": "[number, number]",
+    },
+    "KeyCode": {
+        "kind": "type", "category": "input",
+        "summary": "Keyboard binding spec. String for single key, array for multi-key (any-matches), '+' for modifiers.",
+        "signature": "string | string[]   // e.g. 'Backspace', ['Meta+z','Control+z']",
+    },
 }
 
 

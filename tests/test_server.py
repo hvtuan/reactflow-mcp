@@ -15,12 +15,14 @@ def test_self_check_data_counts_lower_bounds():
     check = _self_check()
     assert check["deep_dive_chars"] > 20_000
     assert check["sections"] >= 25
-    assert check["api_catalog_entries"] >= 60
+    assert check["api_catalog_entries"] >= 110   # post-Tier-A expansion
     assert check["migration_entries"] >= 10
     assert check["pro_examples"] >= 20
     assert check["svelte_renamed"] >= 4
     assert check["svelte_identical"] >= 50
     assert check["svelte_only"] >= 1
+    assert check["recipes"] >= 10
+    assert len(check["prompts"]) >= 4
 
 
 def test_all_expected_tools_registered():

@@ -13,6 +13,9 @@ Tools:
     - reactflow_get_recipe            — full copy-paste TSX for a specific recipe
     - reactflow_scaffold_flow         — generate a full working TSX app from a node/edge spec
 
+Prompts:
+    - review_flow_spec, migrate_v11_to_v12, clone_pro_feature, pick_layout_algorithm
+
 Resource:
     - reactflow://deep-dive           — full deep-dive markdown brief
 """
@@ -41,6 +44,7 @@ from reactflow_mcp.data.recipes import RECIPES, get_recipe, list_recipes
 from reactflow_mcp.data.svelte_equivalents import IDENTICAL as SVELTE_IDENTICAL
 from reactflow_mcp.data.svelte_equivalents import PORTING_NOTES, RENAMED as SVELTE_RENAMED
 from reactflow_mcp.data.svelte_equivalents import SVELTE_ONLY, lookup as svelte_lookup
+from reactflow_mcp.prompts import clone_pro_feature, migrate_v11_to_v12, pick_layout_algorithm, review_flow_spec
 from reactflow_mcp.scaffolders import scaffold_custom_edge, scaffold_custom_node, scaffold_flow
 from reactflow_mcp.validators import validate_flow
 
@@ -179,13 +183,17 @@ async def reactflow_search_docs(
 ) -> str:
     """Search the bundled React Flow deep-dive doc for relevant sections.
 
-    Use this for general "how do I..." or conceptual React Flow questions —
-    covers Concepts, Customization, Layouting, Advanced Use (perf, SSR,
-    multiplayer, computing-flows…), Troubleshooting, v11→v12 migration,
-    API cheat-sheet, Pro layer, and gotchas.
+    **When to use:**
+    - User asks a conceptual "how do I…" / "what does X mean" question.
+    - You need quick context on perf, SSR, multiplayer, computing-flows, theming,
+      v11→v12 migration, Pro layer, troubleshooting, or gotchas.
+    - Multiple symbols may be involved and you want orientation before drilling in.
 
-    For a specific API symbol (e.g. 'useReactFlow', 'Handle', 'addEdge'),
-    prefer `reactflow_get_api`.
+    **Don't use when:**
+    - User wants a SINGLE API symbol's signature → use `reactflow_get_api`.
+    - User has a v11 symbol and wants the v12 equivalent → use `reactflow_lookup_v11_v12`.
+    - User wants ready-to-paste code for a known pattern (auto-layout, undo-redo, …)
+      → use `reactflow_get_recipe` (covers ~13 Pro-equivalent patterns).
 
     Returns JSON schema:
         {
@@ -273,8 +281,19 @@ async def reactflow_get_api(
 ) -> str:
     """Look up React Flow v12 API reference for a single symbol.
 
-    Returns kind (component/hook/util/type/enum), signature, props/params,
+    Returns kind (component/hook/util/type/enum/callback), signature, props/params,
     notes, deprecation status, OSS/Pro flag.
+
+    **When to use:**
+    - User asks "what does `useReactFlow` return?" / "what props does `<Handle>` take?".
+    - You're about to write code and need the exact signature of an API.
+    - You suspect a symbol is deprecated and want to confirm + get the replacement.
+    - 113 React Flow symbols covered (components, hooks, utils, types, enums, callbacks).
+
+    **Don't use when:**
+    - You don't know the symbol name → use `reactflow_search_docs` with a topic keyword.
+    - You're looking for a recipe / code pattern → use `reactflow_get_recipe`.
+    - You have a v11 symbol → `reactflow_lookup_v11_v12` (returns the v12 name).
 
     Returns JSON schema:
         {
@@ -370,6 +389,20 @@ async def reactflow_lookup_v11_v12(
     Catches common LLM mistakes: `parentNode` → `parentId`,
     `project()` → `screenToFlowPosition()`, `onEdgeUpdate` → `onReconnect`,
     `node.width` → `node.measured.width`, package `reactflow` → `@xyflow/react`.
+
+    **When to use:**
+    - You see (or are about to emit) v11 code: imports from `reactflow`, uses
+      `parentNode`, `xPos`/`yPos`, `onEdgeUpdate`, `project()`, `nodeInternals`,
+      `useHandleConnections`, etc.
+    - User asks "how do I migrate from v11 to v12?".
+    - A symbol you remembered doesn't exist in v12 catalog — try here before
+      assuming deprecation.
+
+    **Don't use when:**
+    - Symbol already exists in v12 catalog (use `reactflow_get_api`).
+    - User wants the full migration overview — return the full v12 behavior-change
+      list (this tool always includes it) but also point to `reactflow_search_docs`
+      with `section='v11 → v12 migration'`.
 
     Returns JSON schema:
         {
@@ -957,6 +990,19 @@ async def reactflow_get_recipe(
     APIs used, npm dependencies needed, one or more full source files
     (TSX/TS), known gotchas, and reference URLs.
 
+    **When to use:**
+    - User asks "how do I add auto-layout / undo/redo / copy-paste / helper lines
+      / expand-collapse / force layout / shapes / editable edges / server-side
+      image / freehand draw to my flow?".
+    - User is considering React Flow Pro for a specific example — this MCP
+      gives them the OSS implementation instead. (Project mission: replace Pro,
+      not recommend it.)
+    - You need production-tested boilerplate, not a hand-written attempt.
+
+    **Don't use when:**
+    - You don't know the recipe slug → call `reactflow_list_recipes` first.
+    - User wants the underlying API doc, not a recipe → `reactflow_get_api`.
+
     Returns JSON schema:
         {
           "name": str, "found": bool,
@@ -1114,6 +1160,53 @@ async def reactflow_scaffold_flow(
     return _format_response(result, response_format, to_md)
 
 
+# ─────────── prompts ───────────
+
+
+@mcp.prompt(
+    name="review_flow_spec",
+    title="Review a React Flow JSON spec",
+    description="Structured walkthrough that validates a flow JSON, surfaces v11 leftovers, cycles, and produces a code-review-style verdict.",
+)
+def _prompt_review_flow_spec(flow_json: str) -> str:
+    """Args: flow_json (str) — JSON string of {nodes, edges}."""
+    return review_flow_spec(flow_json)
+
+
+@mcp.prompt(
+    name="migrate_v11_to_v12",
+    title="Migrate React Flow v11 → v12",
+    description="Walks the LLM through every rename, immutability change, and dim-semantic shift between v11 (reactflow) and v12 (@xyflow/react).",
+)
+def _prompt_migrate_v11_to_v12(code_snippet: str) -> str:
+    """Args: code_snippet (str) — a TSX/TS snippet using v11 React Flow."""
+    return migrate_v11_to_v12(code_snippet)
+
+
+@mcp.prompt(
+    name="clone_pro_feature",
+    title="Clone a React Flow Pro example with OSS recipes",
+    description="Orchestrate list_recipes + get_recipe + search_docs to deliver the OSS implementation of a Pro example — never recommends buying Pro.",
+)
+def _prompt_clone_pro_feature(feature: str) -> str:
+    """Args: feature (str) — Pro example name (e.g. 'Auto Layout', 'Undo/Redo', 'Helper Lines', 'Editable Edge')."""
+    return clone_pro_feature(feature)
+
+
+@mcp.prompt(
+    name="pick_layout_algorithm",
+    title="Pick the right auto-layout for a graph",
+    description="Given graph size, edge density, and topology shape, picks dagre vs elkjs vs d3-force and delivers the recipe.",
+)
+def _prompt_pick_layout_algorithm(node_count: int, edge_density: str, shape: str) -> str:
+    """Args:
+        node_count (int) — number of nodes (e.g. 5, 50, 500).
+        edge_density (str) — 'sparse' | 'dense'.
+        shape (str) — 'hierarchical' | 'organic' | 'directed-acyclic' | 'cyclic'.
+    """
+    return pick_layout_algorithm(node_count, edge_density, shape)
+
+
 # ─────────── resource: deep-dive doc ───────────
 
 
@@ -1153,5 +1246,11 @@ def _self_check() -> dict:
             "reactflow_scaffold_flow",
         ],
         "recipes": len(RECIPES),
+        "prompts": [
+            "review_flow_spec",
+            "migrate_v11_to_v12",
+            "clone_pro_feature",
+            "pick_layout_algorithm",
+        ],
         "resources": [DEEP_DIVE_URI],
     }
