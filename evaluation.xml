@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+Evaluation suite for reactflow-mcp.
+
+Each question requires reactflow-mcp tools to answer accurately. Designed so an
+LLM WITHOUT this MCP would likely get them wrong (training-data drift on v12,
+unknown Pro examples, unknown OSS recipes), and an LLM WITH this MCP can call
+the right tool and produce the exact answer string.
+
+Run via the mcp-builder evaluation harness or any MCP-aware client.
+-->
+<evaluation>
+
+  <qa_pair>
+    <question>In React Flow v12 (@xyflow/react), the v11 instance method that converted a screen-space pointer position to flow-space coordinates was called `project`. What is its v12 replacement?</question>
+    <answer>screenToFlowPosition</answer>
+  </qa_pair>
+
+  <qa_pair>
+    <question>In React Flow v12, the v11 node field `parentNode` was renamed. What is the new field name in v12?</question>
+    <answer>parentId</answer>
+  </qa_pair>
+
+  <qa_pair>
+    <question>In React Flow v12, what is the maintained npm package name for dagre that should be used in the auto-layout recipe (instead of the unmaintained legacy `dagre` package)?</question>
+    <answer>@dagrejs/dagre</answer>
+  </qa_pair>
+
+  <qa_pair>
+    <question>In Svelte Flow (@xyflow/svelte), what is the equivalent component name for React Flow's `EdgeLabelRenderer`?</question>
+    <answer>EdgeLabel</answer>
+  </qa_pair>
+
+  <qa_pair>
+    <question>In React Flow v12, after dynamically adding or removing handles on a custom node, which hook must be called with the node's id to make the library re-measure handle positions?</question>
+    <answer>useUpdateNodeInternals</answer>
+  </qa_pair>
+
+  <qa_pair>
+    <question>In React Flow v12, reading a node's measured DOM width is no longer done via `node.width`. What is the v12 property path?</question>
+    <answer>node.measured.width</answer>
+  </qa_pair>
+
+  <qa_pair>
+    <question>The reactflow-mcp `node_position_animation` recipe says CSS `transition: transform` does NOT work for animating React Flow node positions. Which npm package does the recipe use instead to interpolate positions per-frame?</question>
+    <answer>d3-timer</answer>
+  </qa_pair>
+
+  <qa_pair>
+    <question>In React Flow v12, what is the boolean prop name on `proOptions` that hides the bottom-right attribution badge?</question>
+    <answer>hideAttribution</answer>
+  </qa_pair>
+
+  <qa_pair>
+    <question>The reactflow-mcp `libavoid_orthogonal_routing` recipe wraps an obstacle-aware edge router that ships as a WASM module. What is the exact npm package name used in the recipe?</question>
+    <answer>libavoid-js</answer>
+  </qa_pair>
+
+  <qa_pair>
+    <question>In React Flow v12 sub-flows, when a node has a `parentId` field referencing another node, what is the hard ordering requirement for those two nodes inside the `nodes` array?</question>
+    <answer>The parent node must come before the child node in the array.</answer>
+  </qa_pair>
+
+</evaluation>

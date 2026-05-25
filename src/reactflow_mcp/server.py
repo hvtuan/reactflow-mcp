@@ -13,6 +13,8 @@ Tools:
     - reactflow_get_recipe            — full copy-paste TSX for a specific recipe
     - reactflow_scaffold_flow         — generate a full working TSX app from a node/edge spec
     - reactflow_scaffold_workflow_app — full Vite or Next.js starter project (Pro template clone)
+    - reactflow_render_flow           — render a flow JSON to Mermaid or ASCII tree
+    - reactflow_explain_change        — explain a NodeChange / EdgeChange dispatch
 
 Prompts:
     - review_flow_spec, migrate_v11_to_v12, clone_pro_feature, pick_layout_algorithm
@@ -46,6 +48,7 @@ from reactflow_mcp.data.svelte_equivalents import IDENTICAL as SVELTE_IDENTICAL
 from reactflow_mcp.data.svelte_equivalents import PORTING_NOTES, RENAMED as SVELTE_RENAMED
 from reactflow_mcp.data.svelte_equivalents import SVELTE_ONLY, lookup as svelte_lookup
 from reactflow_mcp.prompts import clone_pro_feature, migrate_v11_to_v12, pick_layout_algorithm, review_flow_spec
+from reactflow_mcp.renderers import explain_change, render_ascii, render_mermaid
 from reactflow_mcp.scaffolders import scaffold_custom_edge, scaffold_custom_node, scaffold_flow
 from reactflow_mcp.templates import scaffold_workflow_app
 from reactflow_mcp.validators import validate_flow
@@ -135,20 +138,41 @@ mcp = FastMCP(
 # ─────────── tool 1: search_docs ───────────
 
 
-def _score(section: dict, query_lc: str) -> int:
+def _score(section: dict, query_lc: str) -> float:
+    """Score a section against a query.
+
+    Earlier version summed match counts, which made huge "cheat-sheet"
+    sections beat smaller, topical ones. v2 normalizes by sqrt(body_size)
+    so a small, on-topic section outranks a giant catch-all section that
+    happens to mention the query token many times.
+    """
+    import math
     title = section["title"].lower()
     body = section["body"].lower()
-    score = 0
+    anchor = section.get("anchor", "")
+
+    raw = 0.0
+    # exact-substring title match is highest signal
     if query_lc in title:
-        score += 10
-    score += body.count(query_lc) * 2
-    for token in query_lc.split():
-        if len(token) < 3:
-            continue
+        raw += 20
+    if query_lc.replace(" ", "-") == anchor or query_lc == anchor.split("/")[-1]:
+        raw += 30   # anchor exact match (e.g. query 'edge-labels' hits the section anchor)
+    # body substring matches
+    raw += body.count(query_lc) * 2
+    # token-level
+    tokens = [t for t in query_lc.split() if len(t) >= 3]
+    for token in tokens:
         if token in title:
-            score += 4
-        score += body.count(token)
-    return score
+            raw += 5
+        raw += body.count(token) * 0.5
+
+    # H3 sub-sections (more specific) get a bonus
+    if section.get("level") == 3:
+        raw += 3
+
+    # normalize by sqrt size — big sections dominated v1
+    size_penalty = math.sqrt(max(1, len(body)) / 200)   # 200 chars = 1.0, 5000 chars ≈ 5x penalty
+    return raw / size_penalty
 
 
 @mcp.tool(
@@ -1252,6 +1276,134 @@ async def reactflow_scaffold_workflow_app(
     return _format_response(result, response_format, to_md)
 
 
+# ─────────── tool 13: render_flow ───────────
+
+
+@mcp.tool(
+    name="reactflow_render_flow",
+    annotations={
+        "title": "Render a flow JSON to Mermaid or ASCII",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": False,
+    },
+)
+async def reactflow_render_flow(
+    flow_json: Annotated[str, Field(
+        min_length=2,
+        description="JSON string of the flow object: `{nodes, edges}`.",
+    )],
+    format: Annotated[str, Field(
+        default="mermaid",
+        description="Output format: 'mermaid' (renders in any markdown viewer / GitHub) | 'ascii' (text outline tree).",
+    )] = "mermaid",
+    direction: Annotated[str, Field(
+        default="TB",
+        description="Mermaid layout direction: 'TB' (top-down) | 'BT' (bottom-up) | 'LR' (left-right) | 'RL' (right-left). Ignored for ascii.",
+    )] = "TB",
+    response_format: Annotated[ResponseFormat, Field(
+        default=ResponseFormat.MARKDOWN,
+        description="markdown | json",
+    )] = ResponseFormat.MARKDOWN,
+) -> str:
+    """Render a React Flow JSON to a visual preview (Mermaid or ASCII tree).
+
+    **When to use:**
+    - LLM just generated a flow JSON and wants to sanity-check structure without
+      asking the user to spin up a React app.
+    - Document a flow inside a markdown doc / PR description (Mermaid renders in GitHub).
+    - Quick visual check of cycles / branching during debugging.
+
+    Returns JSON schema:
+        { "format": str, "direction": str?, "output": str }
+    """
+    import json as _json
+    try:
+        flow = _json.loads(flow_json)
+    except _json.JSONDecodeError as e:
+        return f"Error: invalid JSON — {e.msg} at line {e.lineno} col {e.colno}."
+    try:
+        if format == "mermaid":
+            out = render_mermaid(flow, direction=direction)
+        elif format == "ascii":
+            out = render_ascii(flow)
+        else:
+            return f"Error: format must be 'mermaid' or 'ascii', got {format!r}."
+    except ValueError as e:
+        return f"Error: {e}"
+
+    payload = {"format": format, "direction": direction if format == "mermaid" else None, "output": out}
+
+    def to_md(p: dict) -> str:
+        if p["format"] == "mermaid":
+            return f"# Flow preview (Mermaid)\n\n```mermaid\n{p['output']}\n```"
+        return f"# Flow preview (ASCII tree)\n\n```\n{p['output']}\n```"
+
+    return _format_response(payload, response_format, to_md)
+
+
+# ─────────── tool 14: explain_change ───────────
+
+
+@mcp.tool(
+    name="reactflow_explain_change",
+    annotations={
+        "title": "Explain a NodeChange / EdgeChange dispatch",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": False,
+    },
+)
+async def reactflow_explain_change(
+    change_json: Annotated[str, Field(
+        min_length=2,
+        description="JSON string of a single NodeChange or EdgeChange object — what RF passes into your onNodesChange/onEdgesChange handler.",
+    )],
+    response_format: Annotated[ResponseFormat, Field(
+        default=ResponseFormat.MARKDOWN,
+        description="markdown | json",
+    )] = ResponseFormat.MARKDOWN,
+) -> str:
+    """Explain a single React Flow NodeChange or EdgeChange in plain English.
+
+    **When to use:**
+    - You're staring at a `console.log(changes)` dump and don't know what each
+      change type means or when it fires.
+    - You're writing an undo/redo, history, or analytics layer and need to know
+      which change types are safe to snapshot (`dragging=true` position changes
+      = no, `dragStop` / `add` / `remove` = yes).
+
+    Returns JSON schema:
+        {
+          "ok": bool,
+          "type": str,        // 'add' | 'remove' | 'replace' | 'position' | 'dimensions' | 'select'
+          "kind": str,        // 'node' | 'edge' | 'node-or-edge' | 'unknown'
+          "explanation": str,
+          "recipe_hint": str? // pointer to relevant recipe (e.g. undo_redo)
+        }
+    """
+    import json as _json
+    try:
+        change = _json.loads(change_json)
+    except _json.JSONDecodeError as e:
+        return f"Error: invalid JSON — {e.msg}."
+    result = explain_change(change)
+
+    def to_md(p: dict) -> str:
+        lines = [f"# Change explainer — `{p.get('type', '?')}` ({p.get('kind', '?')})"]
+        if not p.get("ok"):
+            lines.append(f"\n⚠️ {p.get('error') or p.get('explanation')}")
+            return "\n".join(lines)
+        lines.append(f"\n{p['explanation']}")
+        if p.get("recipe_hint"):
+            lines.append(f"\n**Hint:** {p['recipe_hint']}")
+        return "\n".join(lines)
+
+    return _format_response(result, response_format, to_md)
+
+
 # ─────────── prompts ───────────
 
 
@@ -1337,6 +1489,8 @@ def _self_check() -> dict:
             "reactflow_get_recipe",
             "reactflow_scaffold_flow",
             "reactflow_scaffold_workflow_app",
+            "reactflow_render_flow",
+            "reactflow_explain_change",
         ],
         "recipes": len(RECIPES),
         "prompts": [

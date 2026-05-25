@@ -287,7 +287,21 @@ No public SLA on response time / uptime.
 
 ---
 
-## 7. When to reach for Pro vs roll-your-own
+## 7. Building these patterns yourself (the reason this MCP exists)
 
-- **Reach for Pro** if you need: collaborative editing, undo/redo, copy/paste, expand/collapse trees, helper lines, force layout, dynamic grouping, freehand drawing, server-side image export, or a starter workflow editor — and time-to-ship matters more than €129+/mo.
-- **Roll your own (OSS only)** if: you're prototyping, your editor is single-user with simple state, you have time/expertise to implement undo/copy-paste/layout yourself, or you're allergic to subscriptions. The OSS surface is feature-complete for building most flow editors — Pro accelerates the "everyone re-implements this" patterns.
+Every paid Pro example is composable from `@xyflow/react` OSS primitives plus a small number of well-known libs (dagre, elkjs, d3-force, Yjs, perfect-freehand, libavoid). This MCP server ships **production-tested recipes** for them:
+
+- **Auto-layout** (dagre, elkjs) · **force-directed layout** · **dynamic layouting with placeholders**
+- **Undo/redo** · **copy/paste** (Cmd/Ctrl shortcuts) · **node-position animation** (d3-timer based — CSS transition doesn't work with RF's imperative transform)
+- **Helper lines / alignment guides** (basic + viewport-aware advanced)
+- **Expand/collapse subtrees** · **selection grouping** (Cmd/Ctrl+G) · **dynamic drag-into-container grouping**
+- **SVG flowchart shapes** (diamond / ellipse / hexagon / cylinder / parallelogram)
+- **Editable edges** with draggable control points
+- **Orthogonal edge routing** (libavoid-js WASM)
+- **Real-time collaborative editing** with Yjs CRDT + presence cursors
+- **Freehand drawing** mode (perfect-freehand smoothed strokes)
+- **Server-side image export** (SSR + resvg-js / Puppeteer)
+- **Remove attribution badge** (just a prop)
+- **Full Workflow Editor + AI Workflow Editor starter projects** (Vite or Next.js, with Zustand store + drag-drop sidebar + AI panel using Vercel AI SDK)
+
+Call `reactflow_list_recipes` and `reactflow_get_recipe` to retrieve the code. Call `reactflow_scaffold_workflow_app` for the full template projects.
