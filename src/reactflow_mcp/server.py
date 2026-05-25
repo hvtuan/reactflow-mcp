@@ -12,6 +12,7 @@ Tools:
     - reactflow_list_recipes          — list OSS recipes that clone Pro patterns
     - reactflow_get_recipe            — full copy-paste TSX for a specific recipe
     - reactflow_scaffold_flow         — generate a full working TSX app from a node/edge spec
+    - reactflow_scaffold_workflow_app — full Vite or Next.js starter project (Pro template clone)
 
 Prompts:
     - review_flow_spec, migrate_v11_to_v12, clone_pro_feature, pick_layout_algorithm
@@ -46,6 +47,7 @@ from reactflow_mcp.data.svelte_equivalents import PORTING_NOTES, RENAMED as SVEL
 from reactflow_mcp.data.svelte_equivalents import SVELTE_ONLY, lookup as svelte_lookup
 from reactflow_mcp.prompts import clone_pro_feature, migrate_v11_to_v12, pick_layout_algorithm, review_flow_spec
 from reactflow_mcp.scaffolders import scaffold_custom_edge, scaffold_custom_node, scaffold_flow
+from reactflow_mcp.templates import scaffold_workflow_app
 from reactflow_mcp.validators import validate_flow
 
 # ───────────────────────── constants ─────────────────────────
@@ -1160,6 +1162,96 @@ async def reactflow_scaffold_flow(
     return _format_response(result, response_format, to_md)
 
 
+# ─────────── tool 12: scaffold_workflow_app ───────────
+
+
+@mcp.tool(
+    name="reactflow_scaffold_workflow_app",
+    annotations={
+        "title": "Scaffold a full workflow-editor app (Pro template clone)",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": False,
+    },
+)
+async def reactflow_scaffold_workflow_app(
+    name: Annotated[str, Field(
+        default="my-workflow-editor", min_length=1, max_length=64,
+        description="Project directory name (safe identifier, no slashes/spaces).",
+    )] = "my-workflow-editor",
+    stack: Annotated[str, Field(
+        default="vite",
+        description="'vite' (React + Vite, simpler) | 'nextjs' (Next.js 15 App Router, has built-in /api/chat route for AI).",
+    )] = "vite",
+    with_ai: Annotated[bool, Field(
+        default=False,
+        description="Add an AI side-panel (Vercel AI SDK `useChat`) that takes the current flow as context and can return JSON patches the user applies. Clones the Pro 'AI Workflow Editor' template.",
+    )] = False,
+    persist: Annotated[str, Field(
+        default="localstorage",
+        description="State persistence: 'localstorage' (zundo-style via Zustand persist), 'supabase' (commented placeholders + schema TODO), 'none'.",
+    )] = "localstorage",
+    with_sidebar: Annotated[bool, Field(
+        default=True,
+        description="Include drag-and-drop node-palette sidebar.",
+    )] = True,
+    response_format: Annotated[ResponseFormat, Field(
+        default=ResponseFormat.MARKDOWN,
+        description="markdown | json",
+    )] = ResponseFormat.MARKDOWN,
+) -> str:
+    """Generate a complete workflow-editor starter app (Pro template clone).
+
+    Produces a multi-file project: package.json + tsconfig + vite/next config +
+    entry point + `<Flow>` with Zustand store + custom TaskNode (todo/doing/done)
+    + drag-drop sidebar palette + undo/redo + export JSON toolbar.
+    With `with_ai=true`, adds an `<AiPanel>` driven by Vercel AI SDK.
+
+    Replaces the paid React Flow Pro "Workflow Editor" + "AI Workflow Editor"
+    templates with an OSS equivalent.
+
+    Returns JSON schema:
+        {
+          "name": str,
+          "stack": "vite" | "nextjs",
+          "files": {path: source},   // write each at <name>/<path>
+          "deps": [str],
+          "next_steps": [str]
+        }
+    """
+    try:
+        result = scaffold_workflow_app(
+            name=name,
+            stack=stack,
+            with_ai=with_ai,
+            persist=persist,
+            with_sidebar=with_sidebar,
+        )
+    except ValueError as e:
+        return f"Error: {e}"
+
+    def to_md(p: dict) -> str:
+        lines = [f"# Workflow editor scaffold — `{p['name']}` ({p['stack']})"]
+        lines.append(f"\n**Files** ({len(p['files'])}):")
+        for path in sorted(p["files"]):
+            lines.append(f"- `{path}`")
+        lines.append("\n**Dependencies (informational):**")
+        lines.append("```bash\nnpm install " + " ".join(p["deps"]) + "\n```")
+        lines.append("\n**Next steps:**")
+        for i, step in enumerate(p["next_steps"], 1):
+            lines.append(f"{i}. {step}")
+        lines.append("\n## File contents")
+        for path, src in p["files"].items():
+            ext = path.rsplit(".", 1)[-1] if "." in path else "txt"
+            lang_map = {"tsx": "tsx", "ts": "ts", "json": "json", "html": "html", "js": "js", "md": "markdown"}
+            lang = lang_map.get(ext, "txt")
+            lines.append(f"\n### `{path}`\n\n```{lang}\n{src.rstrip()}\n```")
+        return "\n".join(lines)
+
+    return _format_response(result, response_format, to_md)
+
+
 # ─────────── prompts ───────────
 
 
@@ -1244,6 +1336,7 @@ def _self_check() -> dict:
             "reactflow_list_recipes",
             "reactflow_get_recipe",
             "reactflow_scaffold_flow",
+            "reactflow_scaffold_workflow_app",
         ],
         "recipes": len(RECIPES),
         "prompts": [

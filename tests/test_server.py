@@ -6,7 +6,7 @@ from reactflow_mcp.server import _self_check
 def test_self_check_basic_shape():
     check = _self_check()
     assert check["server"] == "reactflow_mcp"
-    assert isinstance(check["tools"], list) and len(check["tools"]) == 11
+    assert isinstance(check["tools"], list) and len(check["tools"]) == 12
     assert check["resources"] == ["reactflow://deep-dive"]
     assert check["recipes"] >= 10
 
@@ -38,5 +38,6 @@ def test_all_expected_tools_registered():
         "reactflow_list_recipes",
         "reactflow_get_recipe",
         "reactflow_scaffold_flow",
+        "reactflow_scaffold_workflow_app",
     }
     assert set(_self_check()["tools"]) == expected
