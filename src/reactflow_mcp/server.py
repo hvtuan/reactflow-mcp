@@ -7,6 +7,7 @@ Tools:
     - reactflow_list_pro_examples     — Pro paid examples catalog (+ filtering)
     - reactflow_scaffold_custom_node  — generate TSX for a custom node component
     - reactflow_scaffold_custom_edge  — generate TSX for a custom edge component
+    - reactflow_validate_flow         — lint a flow JSON for v12 correctness
 
 Resource:
     - reactflow://deep-dive           — full deep-dive markdown brief
@@ -32,6 +33,7 @@ from reactflow_mcp.data.migration import (
 )
 from reactflow_mcp.data.pro_examples import LICENSE_NOTES, PRICING_TIERS, PRO_EXAMPLES
 from reactflow_mcp.scaffolders import scaffold_custom_edge, scaffold_custom_node
+from reactflow_mcp.validators import validate_flow
 
 # ───────────────────────── constants ─────────────────────────
 
@@ -656,6 +658,99 @@ async def reactflow_scaffold_custom_edge(
     )
 
 
+# ─────────── tool 7: validate_flow ───────────
+
+
+@mcp.tool(
+    name="reactflow_validate_flow",
+    annotations={
+        "title": "Validate a React Flow JSON",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": False,
+    },
+)
+async def reactflow_validate_flow(
+    flow_json: Annotated[str, Field(
+        min_length=2,
+        description="JSON string of the flow object: `{\"nodes\": [...], \"edges\": [...]}`. Same shape that `useReactFlow().toObject()` produces.",
+    )],
+    response_format: Annotated[ResponseFormat, Field(
+        default=ResponseFormat.MARKDOWN,
+        description="markdown | json",
+    )] = ResponseFormat.MARKDOWN,
+) -> str:
+    """Lint a React Flow v12 flow object for common correctness issues.
+
+    Hard errors include: missing/duplicate node or edge ids, edge endpoints
+    pointing to non-existent nodes, malformed positions, v11 leftover fields
+    (`parentNode`, `xPos`, `yPos`, `edge.updatable`), parent node appearing
+    after its child (v12 requires parent-first ordering).
+
+    Warnings include: cycles in the graph, parallel/duplicate edges,
+    edge handle ids that don't match a node's `handles[]` array,
+    `node.width`/`height` set as numbers (sets inline styles in v12),
+    runtime-only fields (`positionAbsoluteX/Y`) persisted by mistake.
+
+    Returns stats (counts, type histograms, root/leaf nodes, cycles) for
+    quick orientation even when there are no issues.
+
+    Returns JSON schema:
+        {
+          "ok": bool,
+          "errors":   [{"code": str, "message": str, "ref": str?}],
+          "warnings": [{"code": str, "message": str, "ref": str?}],
+          "stats": {
+            "nodes": int, "edges": int,
+            "node_types": {str: int}, "edge_types": {str: int},
+            "cycles": [[id, ...]],
+            "root_nodes": [str], "leaf_nodes": [str]
+          }
+        }
+    """
+    try:
+        parsed = json.loads(flow_json)
+    except json.JSONDecodeError as e:
+        return f"Error: invalid JSON — {e.msg} at line {e.lineno} col {e.colno}."
+
+    report = validate_flow(parsed)
+
+    def to_md(p: dict) -> str:
+        s = p["stats"]
+        lines = ["# React Flow validation report"]
+        lines.append(f"\n**Status:** {'✅ OK' if p['ok'] else '❌ HAS ERRORS'}")
+        lines.append(f"\n**Stats:** {s['nodes']} nodes, {s['edges']} edges")
+        if s["node_types"]:
+            lines.append(f"- Node types: " + ", ".join(f"`{k}`×{v}" for k, v in s["node_types"].items()))
+        if s["edge_types"]:
+            lines.append(f"- Edge types: " + ", ".join(f"`{k}`×{v}" for k, v in s["edge_types"].items()))
+        if s["root_nodes"]:
+            lines.append(f"- Roots (no incoming): {', '.join(f'`{x}`' for x in s['root_nodes'][:10])}" + (" …" if len(s["root_nodes"]) > 10 else ""))
+        if s["leaf_nodes"]:
+            lines.append(f"- Leaves (no outgoing): {', '.join(f'`{x}`' for x in s['leaf_nodes'][:10])}" + (" …" if len(s["leaf_nodes"]) > 10 else ""))
+        if s["cycles"]:
+            lines.append(f"- Cycles: {len(s['cycles'])}")
+            for cy in s["cycles"][:5]:
+                lines.append(f"  - {' → '.join(cy)}")
+
+        if p["errors"]:
+            lines.append("\n## ❌ Errors")
+            for err in p["errors"]:
+                ref = f" _({err['ref']})_" if err.get("ref") else ""
+                lines.append(f"- `{err['code']}` — {err['message']}{ref}")
+        if p["warnings"]:
+            lines.append("\n## ⚠️ Warnings")
+            for w in p["warnings"]:
+                ref = f" _({w['ref']})_" if w.get("ref") else ""
+                lines.append(f"- `{w['code']}` — {w['message']}{ref}")
+        if not p["errors"] and not p["warnings"]:
+            lines.append("\n_No issues found._")
+        return "\n".join(lines)
+
+    return _format_response(report, response_format, to_md)
+
+
 # ─────────── resource: deep-dive doc ───────────
 
 
@@ -685,6 +780,7 @@ def _self_check() -> dict:
             "reactflow_list_pro_examples",
             "reactflow_scaffold_custom_node",
             "reactflow_scaffold_custom_edge",
+            "reactflow_validate_flow",
         ],
         "resources": [DEEP_DIVE_URI],
     }
