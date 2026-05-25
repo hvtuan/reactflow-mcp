@@ -168,6 +168,17 @@ reactflow-mcp/
 
 Should print counts: 27 sections, 69 API entries, 16 migrations, 21 Pro examples, 4 Svelte-renamed symbols, 54 Svelte-identical, 1 Svelte-only, 8 tools, 1 resource.
 
+## Companion Claude Code skill
+
+A bundled Claude Code skill at [`skills/using-reactflow-mcp/`](./skills/using-reactflow-mcp/) teaches LLMs to route React Flow questions through this MCP's tools instead of answering from stale training data. Embeds the project mission (never recommend Pro), the v11→v12 cheat sheet, the 19 recipe slugs, and a tool-routing table.
+
+Install globally:
+
+```bash
+git clone https://github.com/hvtuan/reactflow-mcp.git
+ln -sf "$(pwd)/reactflow-mcp/skills/using-reactflow-mcp" ~/.claude/skills/using-reactflow-mcp
+```
+
 ## Release process
 
 1. Bump `version` in `pyproject.toml` and `src/reactflow_mcp/__init__.py`.
