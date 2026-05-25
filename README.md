@@ -22,10 +22,16 @@ Out-of-the-box, LLMs hallucinate stale React Flow APIs — `parentNode` instead 
 ## Install
 
 ```bash
+pip install reactflow-mcp                    # once published to PyPI
+```
+
+Or from source:
+
+```bash
 git clone https://github.com/hvtuan/reactflow-mcp.git
 cd reactflow-mcp
 python3 -m venv .venv
-.venv/bin/pip install -e .
+.venv/bin/pip install -e ".[dev]"            # add [dev] to also get pytest
 ```
 
 Requires Python ≥ 3.10.
@@ -121,6 +127,18 @@ reactflow-mcp/
 ```
 
 Should print counts: 27 sections, 69 API entries, 16 migrations, 21 Pro examples, 4 Svelte-renamed symbols, 54 Svelte-identical, 1 Svelte-only, 8 tools, 1 resource.
+
+## Release process
+
+1. Bump `version` in `pyproject.toml` and `src/reactflow_mcp/__init__.py`.
+2. Commit + tag: `git tag v0.X.Y && git push --tags`.
+3. `.github/workflows/release.yml` builds + publishes to PyPI via OIDC trusted publishing — no API token required.
+
+First-time PyPI setup: register the trusted publisher on PyPI (`Publishing → Add a new pending publisher`) with:
+- Owner: `hvtuan`
+- Repository: `reactflow-mcp`
+- Workflow: `release.yml`
+- Environment: `pypi`
 
 ## Roadmap
 
