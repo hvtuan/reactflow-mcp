@@ -1,13 +1,15 @@
 """reactflow_mcp — FastMCP server exposing React Flow knowledge to LLMs.
 
 Tools:
-    - reactflow_search_docs       — full-text search across the deep-dive doc
-    - reactflow_get_api           — structured lookup of a public API symbol
-    - reactflow_lookup_v11_v12    — v11/v10 → v12 migration map
-    - reactflow_list_pro_examples — Pro paid examples catalog (+ filtering)
+    - reactflow_search_docs           — full-text search across the deep-dive doc
+    - reactflow_get_api               — structured lookup of a public API symbol
+    - reactflow_lookup_v11_v12        — v11/v10 → v12 migration map
+    - reactflow_list_pro_examples     — Pro paid examples catalog (+ filtering)
+    - reactflow_scaffold_custom_node  — generate TSX for a custom node component
+    - reactflow_scaffold_custom_edge  — generate TSX for a custom edge component
 
 Resource:
-    - reactflow://deep-dive       — full deep-dive markdown brief
+    - reactflow://deep-dive           — full deep-dive markdown brief
 """
 
 from __future__ import annotations
@@ -29,6 +31,7 @@ from reactflow_mcp.data.migration import (
     lookup as migration_lookup,
 )
 from reactflow_mcp.data.pro_examples import LICENSE_NOTES, PRICING_TIERS, PRO_EXAMPLES
+from reactflow_mcp.scaffolders import scaffold_custom_edge, scaffold_custom_node
 
 # ───────────────────────── constants ─────────────────────────
 
@@ -481,6 +484,178 @@ async def reactflow_list_pro_examples(
     return _format_response(payload, response_format, to_md)
 
 
+# ─────────── tool 5: scaffold_custom_node ───────────
+
+
+def _render_scaffold_md(title: str, result: dict) -> str:
+    lines = [f"# {title}: `{result['component_name']}`"]
+    for w in result["warnings"]:
+        lines.append(f"\n> ⚠️ {w}")
+    lines.append("\n## Component (TSX)\n\n```tsx\n" + result["component"].rstrip() + "\n```")
+    lines.append("\n## Registration\n\n```tsx\n" + result["registration"].rstrip() + "\n```")
+    lines.append("\n## Usage / factory\n\n```tsx\n" + result["usage"].rstrip() + "\n```")
+    return "\n".join(lines)
+
+
+@mcp.tool(
+    name="reactflow_scaffold_custom_node",
+    annotations={
+        "title": "Scaffold custom node TSX",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": False,
+    },
+)
+async def reactflow_scaffold_custom_node(
+    name: Annotated[str, Field(
+        min_length=1, max_length=80,
+        description="Component name (PascalCase preferred — auto-normalized otherwise). Example: 'TextInputNode'.",
+    )],
+    data_fields: Annotated[Optional[list[dict]], Field(
+        default=None,
+        description="List of {name: str, type?: str (TS type), default?: any}. Example: [{'name':'label','type':'string','default':'Hello'},{'name':'value','type':'number','default':0}]. Empty = no data fields.",
+    )] = None,
+    handles: Annotated[Optional[list[dict]], Field(
+        default=None,
+        description="List of {kind: 'source'|'target', position: 'top'|'right'|'bottom'|'left', id?: str}. Default = 1 target on left + 1 source on right.",
+    )] = None,
+    editable: Annotated[bool, Field(
+        default=False,
+        description="If true, render <input> bound to string-typed data fields with useReactFlow().updateNodeData(). Auto-adds `nodrag` class so inputs don't drag the node.",
+    )] = False,
+    with_resizer: Annotated[bool, Field(
+        default=False,
+        description="Include <NodeResizer> with min 120x60 (visible when selected).",
+    )] = False,
+    with_toolbar: Annotated[bool, Field(
+        default=False,
+        description="Include <NodeToolbar> with a Delete button (visible when selected).",
+    )] = False,
+    style: Annotated[str, Field(
+        default="tailwind",
+        description="Styling approach: 'tailwind' (default) | 'css-modules' | 'inline'.",
+    )] = "tailwind",
+    response_format: Annotated[ResponseFormat, Field(
+        default=ResponseFormat.MARKDOWN,
+        description="markdown | json",
+    )] = ResponseFormat.MARKDOWN,
+) -> str:
+    """Generate ready-to-paste TSX for a custom React Flow node component.
+
+    Output covers: the component file, the `nodeTypes` registration snippet,
+    and a factory snippet for creating a Node object that uses it. Targets
+    `@xyflow/react` v12 / React 18+. Handles default to one target (left)
+    + one source (right). All Field metadata explained in the per-arg
+    descriptions.
+
+    Returns JSON schema:
+        {
+          "component_name": str,
+          "type_name": str,         // camelCase key for nodeTypes
+          "component": str,         // TSX file content
+          "registration": str,      // nodeTypes snippet
+          "usage": str,             // Node factory snippet
+          "warnings": [str]
+        }
+    """
+    try:
+        result = scaffold_custom_node(
+            name=name,
+            data_fields=data_fields,
+            handles=handles,
+            editable=editable,
+            with_resizer=with_resizer,
+            with_toolbar=with_toolbar,
+            style=style,
+        )
+    except ValueError as e:
+        return f"Error: {e}"
+
+    return _format_response(
+        result,
+        response_format,
+        lambda r: _render_scaffold_md("Custom node", r),
+    )
+
+
+# ─────────── tool 6: scaffold_custom_edge ───────────
+
+
+@mcp.tool(
+    name="reactflow_scaffold_custom_edge",
+    annotations={
+        "title": "Scaffold custom edge TSX",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": False,
+    },
+)
+async def reactflow_scaffold_custom_edge(
+    name: Annotated[str, Field(
+        min_length=1, max_length=80,
+        description="Component name (PascalCase preferred). Example: 'DeletableEdge'.",
+    )],
+    path_type: Annotated[str, Field(
+        default="bezier",
+        description="Path builder: 'bezier' (default) | 'smoothstep' | 'step' | 'straight' | 'simplebezier'.",
+    )] = "bezier",
+    with_label: Annotated[bool, Field(
+        default=False,
+        description="Render the edge's `label` field. If with_label_renderer is also true, uses HTML overlay (clickable).",
+    )] = False,
+    with_delete_button: Annotated[bool, Field(
+        default=False,
+        description="Adds a small × button on the edge that removes it via useReactFlow().setEdges. Forces with_label_renderer=true.",
+    )] = False,
+    with_label_renderer: Annotated[bool, Field(
+        default=False,
+        description="Wrap label/button in <EdgeLabelRenderer> (HTML portal above SVG). Required for interactive labels.",
+    )] = False,
+    style: Annotated[str, Field(
+        default="tailwind",
+        description="Styling approach: 'tailwind' (default) | 'css-modules' | 'inline'.",
+    )] = "tailwind",
+    response_format: Annotated[ResponseFormat, Field(
+        default=ResponseFormat.MARKDOWN,
+        description="markdown | json",
+    )] = ResponseFormat.MARKDOWN,
+) -> str:
+    """Generate ready-to-paste TSX for a custom React Flow edge component.
+
+    Output covers: the component file (wrapping <BaseEdge> for interactivity),
+    the `edgeTypes` registration snippet, and an Edge factory snippet.
+
+    Returns JSON schema:
+        {
+          "component_name": str,
+          "type_name": str,
+          "component": str,
+          "registration": str,
+          "usage": str,
+          "warnings": [str]
+        }
+    """
+    try:
+        result = scaffold_custom_edge(
+            name=name,
+            path_type=path_type,
+            with_label=with_label,
+            with_delete_button=with_delete_button,
+            with_label_renderer=with_label_renderer,
+            style=style,
+        )
+    except ValueError as e:
+        return f"Error: {e}"
+
+    return _format_response(
+        result,
+        response_format,
+        lambda r: _render_scaffold_md("Custom edge", r),
+    )
+
+
 # ─────────── resource: deep-dive doc ───────────
 
 
@@ -508,6 +683,8 @@ def _self_check() -> dict:
             "reactflow_get_api",
             "reactflow_lookup_v11_v12",
             "reactflow_list_pro_examples",
+            "reactflow_scaffold_custom_node",
+            "reactflow_scaffold_custom_edge",
         ],
         "resources": [DEEP_DIVE_URI],
     }
